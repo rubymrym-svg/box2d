@@ -89,6 +89,8 @@
 /// https://github.com/wolfpld/tracy
 #ifdef BOX2D_PROFILE
 	#include <tracy/TracyC.h>
+
+// todo remove active flag that is not used
 	#define b2TracyCZoneC( ctx, color, active ) TracyCZoneC( ctx, color, active )
 	#define b2TracyCZoneNC( ctx, name, color, active ) TracyCZoneNC( ctx, name, color, active )
 	#define b2TracyCZoneEnd( ctx ) TracyCZoneEnd( ctx )

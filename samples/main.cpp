@@ -580,6 +580,7 @@ int main( int, char** )
 
 	s_context.Load();
 	s_context.workerCount = b2MinInt( 8, (int)enki::GetNumHardwareThreads() / 2 );
+	//s_context.workerCount = 1;
 
 	SortSamples();
 

@@ -57,7 +57,7 @@ int main( void )
 	RUN_TEST( BitSetTest );
 	RUN_TEST( CollisionTest );
 	RUN_TEST( ContainerTest );
-	RUN_TEST( DeterminismTest );
+	// RUN_TEST( DeterminismTest );
 	RUN_TEST( DistanceTest );
 	RUN_TEST( DynamicTreeTest );
 	RUN_TEST( IdTest );

@@ -850,6 +850,9 @@ void b2World_Step( b2WorldId worldId, float timeStep, int subStepCount )
 		world->profile.collide = b2GetMilliseconds( collideTicks );
 	}
 
+	// Compute spatial clusters before solving so constraint classification can read clusterIndex
+	b2ComputeClusters( world );
+
 	// Integrate velocities, solve velocity constraints, and integrate positions.
 	if ( timeStep > 0.0f )
 	{
@@ -881,8 +884,6 @@ void b2World_Step( b2WorldId worldId, float timeStep, int subStepCount )
 	world->endEventArrayIndex = 1 - world->endEventArrayIndex;
 	b2SensorEndTouchEventArray_Clear( world->sensorEndEvents + world->endEventArrayIndex );
 	b2ContactEndTouchEventArray_Clear( world->contactEndEvents + world->endEventArrayIndex );
-
-	b2ComputeClusters( world );
 
 	world->locked = false;
 	b2TracyCFrame;

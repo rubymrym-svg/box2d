@@ -5,6 +5,7 @@
 
 #include "core.h"
 
+#include "box2d/constants.h"
 #include "box2d/math_functions.h"
 
 #include <stdbool.h>
@@ -33,7 +34,12 @@ typedef enum b2SolverStageType
 	b2_stageIntegratePositions,
 	b2_stageRelax,
 	b2_stageRestitution,
-	b2_stageStoreImpulses
+	b2_stageStoreImpulses,
+
+	// Cluster solver stages
+	b2_stageSolveClusters,
+	b2_stageRelaxClusters,
+	b2_stageRestitutionClusters,
 } b2SolverStageType;
 
 typedef enum b2SolverBlockType
@@ -127,6 +133,12 @@ typedef struct b2StepContext
 	b2SolverStage* stages;
 	int stageCount;
 	bool enableWarmStarting;
+
+	// Cluster solver data (transient, allocated from arena each step)
+	struct b2ClusterSolveData* clusterData;
+	struct b2BorderConstraints* borders;
+	int borderCount;
+	int clusterWorkerMap[B2_CLUSTER_COUNT];
 
 	// todo padding to prevent false sharing
 	char dummy1[64];

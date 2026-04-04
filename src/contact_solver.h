@@ -53,3 +53,12 @@ void b2WarmStartContactsTask( int startIndex, int endIndex, b2StepContext* conte
 void b2SolveContactsTask( int startIndex, int endIndex, b2StepContext* context, int colorIndex, bool useBias );
 void b2ApplyRestitutionTask( int startIndex, int endIndex, b2StepContext* context, int colorIndex );
 void b2StoreImpulsesTask( int startIndex, int endIndex, b2StepContext* context );
+
+// Scalar constraint functions for cluster solver (operate on arbitrary constraint arrays)
+void b2PrepareContactConstraints( b2ContactSim** contacts, b2ContactConstraint* constraints, int count,
+								  b2StepContext* context );
+void b2WarmStartContactConstraints( b2ContactConstraint* constraints, int count, b2BodyState* states );
+void b2SolveContactConstraints( b2ContactConstraint* constraints, int count, b2BodyState* states, float inv_h,
+								float contactSpeed, bool useBias );
+void b2ApplyContactRestitution( b2ContactConstraint* constraints, int count, b2BodyState* states, float threshold );
+void b2StoreContactImpulses( b2ContactSim** contacts, b2ContactConstraint* constraints, int count );

@@ -543,8 +543,7 @@ void b2StoreOverflowImpulses( b2StepContext* context )
 
 // Scalar constraint functions for cluster solver
 
-void b2PrepareContactConstraints( b2ContactSim** contacts, b2ContactConstraint* constraints, int count,
-								  b2StepContext* context )
+void b2PrepareContactConstraints( b2ContactSim** contacts, b2ContactConstraint* constraints, int count, b2StepContext* context )
 {
 	b2BodyState* awakeStates = context->states;
 	b2Softness contactSoftness = context->contactSoftness;
@@ -701,8 +700,8 @@ void b2WarmStartContactConstraints( b2ContactConstraint* constraints, int count,
 	}
 }
 
-void b2SolveContactConstraints( b2ContactConstraint* constraints, int count, b2BodyState* states, float inv_h,
-								float contactSpeed, bool useBias )
+void b2SolveContactConstraints( b2ContactConstraint* constraints, int count, b2BodyState* states, float inv_h, float contactSpeed,
+								bool useBias )
 {
 	b2BodyState dummyState = b2_identityBodyState;
 
@@ -805,6 +804,7 @@ void b2SolveContactConstraints( b2ContactConstraint* constraints, int count, b2B
 		}
 
 		// Rolling resistance
+		if ( constraint->rollingResistance > 0.0f )
 		{
 			float deltaLambda = -constraint->rollingMass * ( wB - wA );
 			float lambda = constraint->rollingImpulse;

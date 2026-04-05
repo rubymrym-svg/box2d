@@ -76,6 +76,7 @@ typedef struct b2SolverStage
 	b2SolverBlock* blocks;
 	int blockCount;
 	int colorIndex;
+	bool storeImpulses;
 	// todo consider false sharing of this atomic
 	b2AtomicInt completionCount;
 } b2SolverStage;

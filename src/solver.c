@@ -1056,7 +1056,8 @@ static void b2ExecuteMainStage( b2SolverStage* stage, b2StepContext* context, ui
 
 // Helper: main thread solves borders whose adjacent clusters are both complete.
 // Returns when all borders are solved.
-static void b2SolveBordersWhenReady( b2StepContext* context, b2BodyState* states, bool useBias, bool isRestitution )
+static void b2SolveBordersWhenReady( b2StepContext* context, b2BodyState* states, bool useBias, bool isRestitution,
+									 b2SolverStage* stage )
 {
 	b2TracyCZoneNC( solver_borders, "Solve Borders", b2_colorMintCream, true );
 
@@ -1105,6 +1106,11 @@ static void b2SolveBordersWhenReady( b2StepContext* context, b2BodyState* states
 					{
 						b2SolveJoint( border->joints[k], context, useBias );
 					}
+
+					if ( stage->storeImpulses && border->contactCount > 0 )
+					{
+						b2StoreContactImpulses( border->contacts, border->contactConstraints, border->contactCount );
+					}
 				}
 
 				borderDone[bi] = true;
@@ -1122,7 +1128,7 @@ static void b2SolveBordersWhenReady( b2StepContext* context, b2BodyState* states
 }
 
 static void b2SolveWorkerClusters( b2StepContext* context, int workerIndex, b2BodyState* states, bool useBias,
-								   bool isRestitution )
+								   bool isRestitution, b2SolverStage* stage )
 {
 	b2TracyCZoneNC( solver_clusters, "Solve Clusters", b2_colorLemonChiffon, true );
 
@@ -1155,6 +1161,11 @@ static void b2SolveWorkerClusters( b2StepContext* context, int workerIndex, b2Bo
 			for ( int k = 0; k < cd->jointCount; ++k )
 			{
 				b2SolveJoint( cd->joints[k], context, useBias );
+			}
+
+			if ( stage->storeImpulses && cd->contactCount > 0 )
+			{
+				b2StoreContactImpulses( cd->contacts, cd->contactConstraints, cd->contactCount );
 			}
 		}
 
@@ -1418,10 +1429,10 @@ static void b2ExecuteClusterPhase( b2StepContext* context, b2SolverStage* stage,
 	b2AtomicStoreU32( &context->atomicSyncBits, syncBits );
 
 	// Main thread solves its own clusters
-	b2SolveWorkerClusters( context, 0, states, useBias, isRestitution );
+	b2SolveWorkerClusters( context, 0, states, useBias, isRestitution, stage );
 
 	// Main thread solves borders as adjacent clusters complete
-	b2SolveBordersWhenReady( context, states, useBias, isRestitution );
+	b2SolveBordersWhenReady( context, states, useBias, isRestitution, stage );
 
 	// Wait for all workers to complete their cluster work
 	int expectedWorkers = context->workerCount - 1;
@@ -1477,10 +1488,6 @@ static void b2SolverTask( int startIndex, int endIndex, uint32_t threadIndexIgno
 		profile->prepareConstraints += b2GetMillisecondsAndReset( &ticks );
 
 		int clusterSyncIndex = 1;
-
-		b2ClusterSolveData* clusterData = context->clusterData;
-		b2BorderConstraints* borders = context->borders;
-		int borderCount = context->borderCount;
 
 		int subStepCount = context->subStepCount;
 		for ( int subStepIndex = 0; subStepIndex < subStepCount; ++subStepIndex )
@@ -1541,6 +1548,8 @@ static void b2SolverTask( int startIndex, int endIndex, uint32_t threadIndexIgno
 				b2SolveOverflowJoints( context, false );
 				b2SolveOverflowContacts( context, false );
 
+				bool isLastRelax = ( subStepIndex == subStepCount - 1 ) && ( j == RELAX_ITERATIONS - 1 );
+				stages[iterationStageIndex].storeImpulses = isLastRelax;
 				syncBits = ( clusterSyncIndex << 16 ) | iterationStageIndex;
 				B2_ASSERT( stages[iterationStageIndex].type == b2_stageRelaxClusters );
 				b2ExecuteClusterPhase( context, stages + iterationStageIndex, syncBits, false, false );
@@ -1570,26 +1579,8 @@ static void b2SolverTask( int startIndex, int endIndex, uint32_t threadIndexIgno
 		{
 			b2TracyCZoneNC( store_impulses, "Store Impulses", b2_colorIndigo, true );
 
-			// Store impulses (main thread only)
+			// Store overflow impulses (main thread only, cluster/border impulses stored during last relax)
 			b2StoreOverflowImpulses( context );
-
-			for ( int i = 0; i < B2_CLUSTER_COUNT; ++i )
-			{
-				b2ClusterSolveData* cd = clusterData + i;
-				if ( cd->contactCount > 0 )
-				{
-					b2StoreContactImpulses( cd->contacts, cd->contactConstraints, cd->contactCount );
-				}
-			}
-
-			for ( int i = 0; i < borderCount; ++i )
-			{
-				b2BorderConstraints* border = borders + i;
-				if ( border->contactCount > 0 )
-				{
-					b2StoreContactImpulses( border->contacts, border->contactConstraints, border->contactCount );
-				}
-			}
 
 			b2TracyCZoneEnd( store_impulses );
 		}
@@ -1665,7 +1656,7 @@ static void b2SolverTask( int startIndex, int endIndex, uint32_t threadIndexIgno
 			bool useBias = ( stage->type == b2_stageSolveClusters );
 			bool isRestitution = ( stage->type == b2_stageRestitutionClusters );
 
-			b2SolveWorkerClusters( context, workerIndex, states, useBias, isRestitution );
+			b2SolveWorkerClusters( context, workerIndex, states, useBias, isRestitution, stage );
 
 			// Signal completion to main thread
 			b2AtomicFetchAddInt( &stage->completionCount, 1 );
@@ -1868,6 +1859,17 @@ void b2Solve( b2World* world, b2StepContext* stepContext )
 
 			// Greedily assign each cluster (heaviest first) to the least-loaded worker
 			int workerLoad[B2_MAX_WORKERS] = { 0 };
+
+			// Seed worker 0 (main thread) with border work since it solves all borders
+			{
+				b2BorderConstraints* borders = stepContext->borders;
+				int borderCount = stepContext->borderCount;
+				for ( int i = 0; i < borderCount; ++i )
+				{
+					workerLoad[0] += borders[i].contactCount + borders[i].jointCount;
+				}
+			}
+
 			for ( int i = 0; i < B2_CLUSTER_COUNT; ++i )
 			{
 				int clusterIndex = sortedIndices[i];

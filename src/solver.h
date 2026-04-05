@@ -40,6 +40,8 @@ typedef enum b2SolverStageType
 	b2_stageSolveClusters,
 	b2_stageRelaxClusters,
 	b2_stageRestitutionClusters,
+	b2_stagePrepareClusters,
+	b2_stageWarmStartClusters,
 } b2SolverStageType;
 
 typedef enum b2SolverBlockType

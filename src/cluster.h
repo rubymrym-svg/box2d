@@ -37,6 +37,12 @@ typedef struct b2ClusterSolveData
 
 	// Signaled by the worker when this cluster's solve phase is done
 	b2AtomicInt solveComplete;
+
+	// Signaled by the worker when this cluster's prepare phase is done
+	b2AtomicInt prepareComplete;
+
+	// Signaled by the worker when this cluster's warm start phase is done
+	b2AtomicInt warmStartComplete;
 } b2ClusterSolveData;
 
 // Border constraints between two clusters (clusterA < clusterB)

@@ -940,6 +940,8 @@ static void b2ExecuteBlock( b2SolverStage* stage, b2StepContext* context, b2Solv
 		case b2_stageSolveClusters:
 		case b2_stageRelaxClusters:
 		case b2_stageRestitutionClusters:
+		case b2_stagePrepareClusters:
+		case b2_stageWarmStartClusters:
 			// Cluster stages are handled directly by b2SolverTask, not through b2ExecuteBlock
 			break;
 	}
@@ -1162,6 +1164,242 @@ static void b2SolveWorkerClusters( b2StepContext* context, int workerIndex, b2Bo
 	b2TracyCZoneEnd( solver_clusters );
 }
 
+static void b2PrepareWorkerClusters( b2StepContext* context, int workerIndex )
+{
+	b2TracyCZoneNC( prepare_clusters, "Prepare Clusters", b2_colorDarkOrange, true );
+
+	b2ClusterSolveData* clusterData = context->clusterData;
+
+	for ( int c = 0; c < B2_CLUSTER_COUNT; ++c )
+	{
+		if ( context->clusterWorkerMap[c] != workerIndex )
+		{
+			continue;
+		}
+
+		b2ClusterSolveData* cd = clusterData + c;
+
+		if ( cd->contactCount > 0 )
+		{
+			b2PrepareContactConstraints( cd->contacts, cd->contactConstraints, cd->contactCount, context );
+		}
+
+		for ( int j = 0; j < cd->jointCount; ++j )
+		{
+			b2PrepareJoint( cd->joints[j], context );
+		}
+
+		b2AtomicStoreInt( &cd->prepareComplete, 1 );
+	}
+
+	b2TracyCZoneEnd( prepare_clusters );
+}
+
+static void b2PrepareBordersWhenReady( b2StepContext* context )
+{
+	b2TracyCZoneNC( prepare_borders, "Prepare Borders", b2_colorMintCream, true );
+
+	b2BorderConstraints* borders = context->borders;
+	int borderCount = context->borderCount;
+	b2ClusterSolveData* clusterData = context->clusterData;
+
+	if ( borderCount == 0 )
+	{
+		b2TracyCZoneEnd( prepare_borders );
+		return;
+	}
+
+	int bordersPrepared = 0;
+	bool borderDone[B2_MAX_BORDERS];
+	memset( borderDone, 0, (size_t)borderCount * sizeof( bool ) );
+
+	while ( bordersPrepared < borderCount )
+	{
+		for ( int bi = 0; bi < borderCount; ++bi )
+		{
+			if ( borderDone[bi] )
+			{
+				continue;
+			}
+
+			b2BorderConstraints* border = borders + bi;
+			if ( b2AtomicLoadInt( &clusterData[border->clusterA].prepareComplete ) &&
+				 b2AtomicLoadInt( &clusterData[border->clusterB].prepareComplete ) )
+			{
+				if ( border->contactCount > 0 )
+				{
+					b2PrepareContactConstraints( border->contacts, border->contactConstraints, border->contactCount, context );
+				}
+
+				for ( int j = 0; j < border->jointCount; ++j )
+				{
+					b2PrepareJoint( border->joints[j], context );
+				}
+
+				borderDone[bi] = true;
+				bordersPrepared += 1;
+			}
+		}
+
+		if ( bordersPrepared < borderCount )
+		{
+			b2Pause();
+		}
+	}
+
+	b2TracyCZoneEnd( prepare_borders );
+}
+
+static void b2ExecuteClusterPreparePhase( b2StepContext* context, b2SolverStage* stage, uint32_t syncBits )
+{
+	b2ClusterSolveData* clusterData = context->clusterData;
+
+	// Reset cluster preparation flags
+	for ( int c = 0; c < B2_CLUSTER_COUNT; ++c )
+	{
+		b2AtomicStoreInt( &clusterData[c].prepareComplete, 0 );
+	}
+
+	// Signal workers
+	b2AtomicStoreU32( &context->atomicSyncBits, syncBits );
+
+	// Main thread prepares its own clusters
+	b2PrepareWorkerClusters( context, 0 );
+
+	// Main thread prepares borders as adjacent clusters complete
+	b2PrepareBordersWhenReady( context );
+
+	// Wait for all workers to complete their cluster preparation
+	int expectedWorkers = context->workerCount - 1;
+	if ( expectedWorkers > 0 )
+	{
+		while ( b2AtomicLoadInt( &stage->completionCount ) < expectedWorkers )
+		{
+			b2Pause();
+		}
+		b2AtomicStoreInt( &stage->completionCount, 0 );
+	}
+}
+
+static void b2WarmStartWorkerClusters( b2StepContext* context, int workerIndex )
+{
+	b2TracyCZoneNC( warm_start_clusters, "Warm Start Clusters", b2_colorNavy, true );
+
+	b2BodyState* states = context->states;
+	b2ClusterSolveData* clusterData = context->clusterData;
+
+	for ( int c = 0; c < B2_CLUSTER_COUNT; ++c )
+	{
+		if ( context->clusterWorkerMap[c] != workerIndex )
+		{
+			continue;
+		}
+
+		b2ClusterSolveData* cd = clusterData + c;
+
+		if ( cd->contactCount > 0 )
+		{
+			b2WarmStartContactConstraints( cd->contactConstraints, cd->contactCount, states );
+		}
+
+		for ( int k = 0; k < cd->jointCount; ++k )
+		{
+			b2WarmStartJoint( cd->joints[k], context );
+		}
+
+		b2AtomicStoreInt( &cd->warmStartComplete, 1 );
+	}
+
+	b2TracyCZoneEnd( warm_start_clusters );
+}
+
+static void b2WarmStartBordersWhenReady( b2StepContext* context )
+{
+	b2TracyCZoneNC( warm_start_borders, "Warm Start Borders", b2_colorNavy, true );
+
+	b2BodyState* states = context->states;
+	b2BorderConstraints* borders = context->borders;
+	int borderCount = context->borderCount;
+	b2ClusterSolveData* clusterData = context->clusterData;
+
+	if ( borderCount == 0 )
+	{
+		b2TracyCZoneEnd( warm_start_borders );
+		return;
+	}
+
+	int bordersStarted = 0;
+	bool borderDone[B2_MAX_BORDERS];
+	memset( borderDone, 0, (size_t)borderCount * sizeof( bool ) );
+
+	while ( bordersStarted < borderCount )
+	{
+		for ( int bi = 0; bi < borderCount; ++bi )
+		{
+			if ( borderDone[bi] )
+			{
+				continue;
+			}
+
+			b2BorderConstraints* border = borders + bi;
+			if ( b2AtomicLoadInt( &clusterData[border->clusterA].warmStartComplete ) &&
+				 b2AtomicLoadInt( &clusterData[border->clusterB].warmStartComplete ) )
+			{
+				if ( border->contactCount > 0 )
+				{
+					b2WarmStartContactConstraints( border->contactConstraints, border->contactCount, states );
+				}
+
+				for ( int k = 0; k < border->jointCount; ++k )
+				{
+					b2WarmStartJoint( border->joints[k], context );
+				}
+
+				borderDone[bi] = true;
+				bordersStarted += 1;
+			}
+		}
+
+		if ( bordersStarted < borderCount )
+		{
+			b2Pause();
+		}
+	}
+
+	b2TracyCZoneEnd( warm_start_borders );
+}
+
+static void b2ExecuteClusterWarmStartPhase( b2StepContext* context, b2SolverStage* stage, uint32_t syncBits )
+{
+	b2ClusterSolveData* clusterData = context->clusterData;
+
+	// Reset cluster warm start flags
+	for ( int c = 0; c < B2_CLUSTER_COUNT; ++c )
+	{
+		b2AtomicStoreInt( &clusterData[c].warmStartComplete, 0 );
+	}
+
+	// Signal workers
+	b2AtomicStoreU32( &context->atomicSyncBits, syncBits );
+
+	// Main thread warm starts its own clusters
+	b2WarmStartWorkerClusters( context, 0 );
+
+	// Main thread warm starts borders as adjacent clusters complete
+	b2WarmStartBordersWhenReady( context );
+
+	// Wait for all workers to complete their cluster warm start
+	int expectedWorkers = context->workerCount - 1;
+	if ( expectedWorkers > 0 )
+	{
+		while ( b2AtomicLoadInt( &stage->completionCount ) < expectedWorkers )
+		{
+			b2Pause();
+		}
+		b2AtomicStoreInt( &stage->completionCount, 0 );
+	}
+}
+
 // Helper: main thread executes a cluster phase (solve, relax, or restitution).
 // Signals workers, solves own clusters, solves borders, waits for workers.
 static void b2ExecuteClusterPhase( b2StepContext* context, b2SolverStage* stage, uint32_t syncBits, bool useBias,
@@ -1228,48 +1466,18 @@ static void b2SolverTask( int startIndex, int endIndex, uint32_t threadIndexIgno
 		b2PrepareOverflowJoints( context );
 		b2PrepareOverflowContacts( context );
 
-		// Prepare cluster and border contact constraints (main thread only)
+		// Prepare cluster and border constraints (parallel across workers)
 		{
-			b2TracyCZoneNC( prepare_constraints, "Prepare Constraints", b2_colorDarkOrange, true );
-
-			b2ClusterSolveData* clusterData = context->clusterData;
-			b2BorderConstraints* borders = context->borders;
-			int borderCount = context->borderCount;
-
-			for ( int i = 0; i < B2_CLUSTER_COUNT; ++i )
-			{
-				b2ClusterSolveData* cd = clusterData + i;
-				if ( cd->contactCount > 0 )
-				{
-					b2PrepareContactConstraints( cd->contacts, cd->contactConstraints, cd->contactCount, context );
-				}
-				for ( int j = 0; j < cd->jointCount; ++j )
-				{
-					b2PrepareJoint( cd->joints[j], context );
-				}
-			}
-
-			for ( int i = 0; i < borderCount; ++i )
-			{
-				b2BorderConstraints* border = borders + i;
-				if ( border->contactCount > 0 )
-				{
-					b2PrepareContactConstraints( border->contacts, border->contactConstraints, border->contactCount, context );
-				}
-				for ( int j = 0; j < border->jointCount; ++j )
-				{
-					b2PrepareJoint( border->joints[j], context );
-				}
-			}
-
-			b2TracyCZoneEnd( prepare_constraints );
+			syncBits = ( 1 << 16 ) | stageIndex;
+			B2_ASSERT( stages[stageIndex].type == b2_stagePrepareClusters );
+			b2ExecuteClusterPreparePhase( context, stages + stageIndex, syncBits );
+			stageIndex += 1;
 		}
 
 		profile->prepareConstraints += b2GetMillisecondsAndReset( &ticks );
 
 		int clusterSyncIndex = 1;
 
-		b2BodyState* states = context->states;
 		b2ClusterSolveData* clusterData = context->clusterData;
 		b2BorderConstraints* borders = context->borders;
 		int borderCount = context->borderCount;
@@ -1288,43 +1496,18 @@ static void b2SolverTask( int startIndex, int endIndex, uint32_t threadIndexIgno
 
 			profile->integrateVelocities += b2GetMillisecondsAndReset( &ticks );
 
-			// Warm start all constraints (TGS: seed each sub-step from accumulated impulses of previous sub-step)
+			// Warm start overflow constraints (single-threaded, small count)
+			b2WarmStartOverflowJoints( context );
+			b2WarmStartOverflowContacts( context );
+
+			// Warm start cluster and border constraints (parallel across workers)
 			{
-				b2TracyCZoneNC( warm_start, "Warm Start", b2_colorNavy, true );
-
-				b2WarmStartOverflowJoints( context );
-				b2WarmStartOverflowContacts( context );
-
-				for ( int i = 0; i < B2_CLUSTER_COUNT; ++i )
-				{
-					b2ClusterSolveData* cd = clusterData + i;
-					if ( cd->contactCount > 0 )
-					{
-						b2WarmStartContactConstraints( cd->contactConstraints, cd->contactCount, states );
-					}
-					for ( int j = 0; j < cd->jointCount; ++j )
-					{
-						b2WarmStartJoint( cd->joints[j], context );
-					}
-				}
-
-				for ( int i = 0; i < borderCount; ++i )
-				{
-					b2BorderConstraints* border = borders + i;
-					if ( border->contactCount > 0 )
-					{
-						b2WarmStartContactConstraints( border->contactConstraints, border->contactCount, states );
-					}
-					for ( int j = 0; j < border->jointCount; ++j )
-					{
-						b2WarmStartJoint( border->joints[j], context );
-					}
-				}
-
-				b2TracyCZoneEnd( warm_start );
+				syncBits = ( clusterSyncIndex << 16 ) | iterationStageIndex;
+				B2_ASSERT( stages[iterationStageIndex].type == b2_stageWarmStartClusters );
+				b2ExecuteClusterWarmStartPhase( context, stages + iterationStageIndex, syncBits );
+				clusterSyncIndex += 1;
 			}
-
-			profile->warmStart += b2GetMillisecondsAndReset( &ticks );
+			iterationStageIndex += 1;
 
 			// Solve constraints
 			for ( int j = 0; j < ITERATIONS; ++j )
@@ -1369,8 +1552,8 @@ static void b2SolverTask( int startIndex, int endIndex, uint32_t threadIndexIgno
 		}
 
 		// Advance stage index past sub-step stages:
-		// integrate velocities + solve clusters + integrate positions + relax clusters
-		stageIndex += 1 + ITERATIONS + 1 + RELAX_ITERATIONS;
+		// integrate velocities + warm start clusters + solve clusters + integrate positions + relax clusters
+		stageIndex += 1 + 1 + ITERATIONS + 1 + RELAX_ITERATIONS;
 
 		// Restitution
 		{
@@ -1458,7 +1641,23 @@ static void b2SolverTask( int startIndex, int endIndex, uint32_t threadIndexIgno
 		b2SolverStage* stage = stages + stageIndex;
 
 		// Branch on stage type: cluster phases vs parallel-for phases
-		if ( stage->type == b2_stageSolveClusters || stage->type == b2_stageRelaxClusters ||
+		if ( stage->type == b2_stagePrepareClusters )
+		{
+			// Cluster prepare phase: prepare all clusters assigned to this worker
+			b2PrepareWorkerClusters( context, workerIndex );
+
+			// Signal completion to main thread
+			b2AtomicFetchAddInt( &stage->completionCount, 1 );
+		}
+		else if ( stage->type == b2_stageWarmStartClusters )
+		{
+			// Cluster warm start phase: warm start all clusters assigned to this worker
+			b2WarmStartWorkerClusters( context, workerIndex );
+
+			// Signal completion to main thread
+			b2AtomicFetchAddInt( &stage->completionCount, 1 );
+		}
+		else if ( stage->type == b2_stageSolveClusters || stage->type == b2_stageRelaxClusters ||
 			 stage->type == b2_stageRestitutionClusters )
 		{
 			// Cluster phase: solve all clusters assigned to this worker
@@ -1612,9 +1811,11 @@ void b2Solve( b2World* world, b2StepContext* stepContext )
 		}
 		graph->colors[B2_OVERFLOW_INDEX].overflowConstraints = overflowContactConstraints;
 
-		// Stage setup: prepare joints, integrate velocities, solve clusters, integrate positions, relax clusters, restitution
+		// Stage setup: prepare joints, prepare clusters, warm start clusters, integrate velocities, solve clusters, integrate positions, relax clusters, restitution
 		int stageCount = 0;
 		stageCount += 1; // b2_stagePrepareJoints
+		stageCount += 1; // b2_stagePrepareClusters
+		stageCount += 1; // b2_stageWarmStartClusters (reused per sub-step)
 		stageCount += 1; // b2_stageIntegrateVelocities (reused per sub-step)
 		stageCount += 1; // b2_stageSolveClusters (reused per sub-step per iteration)
 		stageCount += 1; // b2_stageIntegratePositions (reused per sub-step)
@@ -1637,10 +1838,55 @@ void b2Solve( b2World* world, b2StepContext* stepContext )
 
 		b2ClassifyConstraints( world, stepContext );
 
-		// Assign clusters to workers (round-robin for L2 cache affinity)
-		for ( int i = 0; i < B2_CLUSTER_COUNT; ++i )
+		// Assign clusters to workers using LPT (Longest Processing Time) heuristic
+		// for load-balanced scheduling. Same worker handles a cluster across all phases
+		// (prepare, warm start, solve, relax) preserving L2 cache affinity.
 		{
-			stepContext->clusterWorkerMap[i] = i % workerCount;
+			// Compute per-cluster work estimate
+			int clusterWork[B2_CLUSTER_COUNT];
+			int sortedIndices[B2_CLUSTER_COUNT];
+			for ( int i = 0; i < B2_CLUSTER_COUNT; ++i )
+			{
+				b2ClusterSolveData* cd = stepContext->clusterData + i;
+				clusterWork[i] = cd->contactCount + cd->jointCount;
+				sortedIndices[i] = i;
+			}
+
+			// Sort cluster indices by work descending (insertion sort, only 16 elements)
+			for ( int i = 1; i < B2_CLUSTER_COUNT; ++i )
+			{
+				int key = sortedIndices[i];
+				int keyWork = clusterWork[key];
+				int j = i - 1;
+				while ( j >= 0 && clusterWork[sortedIndices[j]] < keyWork )
+				{
+					sortedIndices[j + 1] = sortedIndices[j];
+					j -= 1;
+				}
+				sortedIndices[j + 1] = key;
+			}
+
+			// Greedily assign each cluster (heaviest first) to the least-loaded worker
+			int workerLoad[B2_MAX_WORKERS] = { 0 };
+			for ( int i = 0; i < B2_CLUSTER_COUNT; ++i )
+			{
+				int clusterIndex = sortedIndices[i];
+
+				// Find worker with minimum load
+				int minLoad = workerLoad[0];
+				int minWorker = 0;
+				for ( int w = 1; w < workerCount; ++w )
+				{
+					if ( workerLoad[w] < minLoad )
+					{
+						minLoad = workerLoad[w];
+						minWorker = w;
+					}
+				}
+
+				stepContext->clusterWorkerMap[clusterIndex] = minWorker;
+				workerLoad[minWorker] += clusterWork[clusterIndex];
+			}
 		}
 
 		// Split an awake island
@@ -1688,10 +1934,26 @@ void b2Solve( b2World* world, b2StepContext* stepContext )
 		b2AtomicStoreInt( &stage->completionCount, 0 );
 		stage += 1;
 
+		// Prepare clusters (cluster phase, runs once)
+		stage->type = b2_stagePrepareClusters;
+		stage->blocks = NULL;
+		stage->blockCount = 0;
+		stage->colorIndex = -1;
+		b2AtomicStoreInt( &stage->completionCount, 0 );
+		stage += 1;
+
 		// Integrate velocities (parallel-for, reused per sub-step)
 		stage->type = b2_stageIntegrateVelocities;
 		stage->blocks = bodyBlocks;
 		stage->blockCount = bodyBlockCount;
+		stage->colorIndex = -1;
+		b2AtomicStoreInt( &stage->completionCount, 0 );
+		stage += 1;
+
+		// Warm start clusters (cluster phase, reused per sub-step)
+		stage->type = b2_stageWarmStartClusters;
+		stage->blocks = NULL;
+		stage->blockCount = 0;
 		stage->colorIndex = -1;
 		b2AtomicStoreInt( &stage->completionCount, 0 );
 		stage += 1;

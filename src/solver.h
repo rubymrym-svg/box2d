@@ -27,14 +27,8 @@ typedef struct b2Softness
 typedef enum b2SolverStageType
 {
 	b2_stagePrepareJoints,
-	b2_stagePrepareContacts,
 	b2_stageIntegrateVelocities,
-	b2_stageWarmStart,
-	b2_stageSolve,
 	b2_stageIntegratePositions,
-	b2_stageRelax,
-	b2_stageRestitution,
-	b2_stageStoreImpulses,
 
 	// Cluster solver stages
 	b2_stageSolveClusters,
@@ -48,9 +42,7 @@ typedef enum b2SolverBlockType
 {
 	b2_bodyBlock,
 	b2_jointBlock,
-	b2_contactBlock,
-	b2_graphJointBlock,
-	b2_graphContactBlock
+	b2_contactBlock
 } b2SolverBlockType;
 
 // Each block of work has a sync index that gets incremented when a worker claims the block. This ensures only a single worker
@@ -75,7 +67,6 @@ typedef struct b2SolverStage
 	b2SolverStageType type;
 	b2SolverBlock* blocks;
 	int blockCount;
-	int colorIndex;
 	bool storeImpulses;
 	// todo consider false sharing of this atomic
 	b2AtomicInt completionCount;
@@ -103,7 +94,6 @@ typedef struct b2StepContext
 	float maxLinearVelocity;
 
 	struct b2World* world;
-	struct b2ConstraintGraph* graph;
 
 	// shortcut to body states from awake set
 	b2BodyState* states;
@@ -129,8 +119,6 @@ typedef struct b2StepContext
 	// to constraint graph colors
 	b2ContactSim** contacts;
 
-	struct b2ContactConstraintWide* wideContactConstraints;
-	int activeColorCount;
 	int workerCount;
 
 	b2SolverStage* stages;

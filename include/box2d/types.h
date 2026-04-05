@@ -539,7 +539,6 @@ typedef struct b2Counters
 	int treeHeight;
 	int byteCount;
 	int taskCount;
-	int colorCounts[24];
 	int clusterCounts[B2_CLUSTER_COUNT];
 } b2Counters;
 //! @endcond
@@ -1413,9 +1412,6 @@ typedef struct b2DebugDraw
 
 	/// Option to draw body names
 	bool drawBodyNames;
-
-	/// Option to visualize the graph coloring used for contacts and joints
-	bool drawGraphColors;
 
 	/// Option to draw contact feature ids
 	bool drawContactFeatures;

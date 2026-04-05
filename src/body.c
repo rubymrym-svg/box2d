@@ -230,8 +230,6 @@ b2BodyId b2CreateBody( b2WorldId worldId, const b2BodyDef* def )
 	bodySim->center = def->position;
 	bodySim->rotation0 = bodySim->transform.q;
 	bodySim->center0 = bodySim->center;
-	bodySim->minExtent = B2_HUGE;
-	bodySim->maxExtent = 0.0f;
 	bodySim->linearDamping = def->linearDamping;
 	bodySim->angularDamping = def->angularDamping;
 	bodySim->gravityScale = def->gravityScale;
@@ -303,6 +301,8 @@ b2BodyId b2CreateBody( b2WorldId worldId, const b2BodyDef* def )
 	body->inertia = 0.0f;
 	body->sleepThreshold = def->sleepThreshold;
 	body->sleepTime = 0.0f;
+	body->minExtent = B2_HUGE;
+	body->maxExtent = 0.0f;
 	body->type = def->type;
 	body->flags = bodySim->flags;
 	body->enableSleep = def->enableSleep;
@@ -520,8 +520,8 @@ void b2UpdateBodyMassData( b2World* world, b2Body* body )
 	bodySim->invMass = 0.0f;
 	bodySim->invInertia = 0.0f;
 	bodySim->localCenter = b2Vec2_zero;
-	bodySim->minExtent = B2_HUGE;
-	bodySim->maxExtent = 0.0f;
+	body->minExtent = B2_HUGE;
+	body->maxExtent = 0.0f;
 
 	// Static and kinematic sims have zero mass.
 	if ( body->type != b2_dynamicBody )
@@ -538,8 +538,8 @@ void b2UpdateBodyMassData( b2World* world, b2Body* body )
 				const b2Shape* s = b2ShapeArray_Get( &world->shapes, shapeId );
 
 				b2ShapeExtent extent = b2ComputeShapeExtent( s, b2Vec2_zero );
-				bodySim->minExtent = b2MinFloat( bodySim->minExtent, extent.minExtent );
-				bodySim->maxExtent = b2MaxFloat( bodySim->maxExtent, extent.maxExtent );
+				body->minExtent = b2MinFloat( body->minExtent, extent.minExtent );
+				body->maxExtent = b2MaxFloat( body->maxExtent, extent.maxExtent );
 
 				shapeId = s->nextShapeId;
 			}
@@ -633,8 +633,8 @@ void b2UpdateBodyMassData( b2World* world, b2Body* body )
 		const b2Shape* s = b2ShapeArray_Get( &world->shapes, shapeId );
 
 		b2ShapeExtent extent = b2ComputeShapeExtent( s, localCenter );
-		bodySim->minExtent = b2MinFloat( bodySim->minExtent, extent.minExtent );
-		bodySim->maxExtent = b2MaxFloat( bodySim->maxExtent, extent.maxExtent );
+		body->minExtent = b2MinFloat( body->minExtent, extent.minExtent );
+		body->maxExtent = b2MaxFloat( body->maxExtent, extent.maxExtent );
 
 		shapeId = s->nextShapeId;
 	}
@@ -859,7 +859,7 @@ void b2Body_SetTargetTransform( b2BodyId bodyId, b2Transform target, float timeS
 	// Early out if the body is asleep already and the desired movement is small
 	if ( body->setIndex != b2_awakeSet )
 	{
-		float maxVelocity = b2Length( linearVelocity ) + b2AbsFloat( angularVelocity ) * sim->maxExtent;
+		float maxVelocity = b2Length( linearVelocity ) + b2AbsFloat( angularVelocity ) * body->maxExtent;
 
 		// Return if velocity would be sleepy
 		if ( maxVelocity < body->sleepThreshold )

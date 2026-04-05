@@ -53,12 +53,7 @@ typedef struct b2Contact
 	// B2_NULL_INDEX when slot is free
 	int setIndex;
 
-	// index into the constraint graph color array
-	// B2_NULL_INDEX for non-touching or sleeping contacts
-	// B2_NULL_INDEX when slot is free
-	int colorIndex;
-
-	// contact index within set or graph color
+	// contact index within set
 	// B2_NULL_INDEX when slot is free
 	int localIndex;
 

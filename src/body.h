@@ -99,6 +99,9 @@ typedef struct b2Body
 	float sleepThreshold;
 	float sleepTime;
 
+	float minExtent;
+	float maxExtent;
+
 	// this is used to adjust the fellAsleep flag in the body move array
 	int bodyMoveIndex;
 
@@ -188,8 +191,6 @@ typedef struct b2BodySim
 	float invMass;
 	float invInertia;
 
-	float minExtent;
-	float maxExtent;
 	float linearDamping;
 	float angularDamping;
 	float gravityScale;

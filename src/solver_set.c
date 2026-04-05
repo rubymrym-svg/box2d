@@ -4,7 +4,6 @@
 #include "solver_set.h"
 
 #include "body.h"
-#include "constraint_graph.h"
 #include "contact.h"
 #include "core.h"
 #include "island.h"
@@ -102,7 +101,7 @@ void b2WakeSolverSet( b2World* world, int setIndex )
 		}
 	}
 
-	// transfer touching contacts from sleeping set to contact graph
+	// transfer touching contacts from sleeping set to awake set
 	{
 		int contactCount = set->contactSims.count;
 		for ( int i = 0; i < contactCount; ++i )
@@ -113,8 +112,10 @@ void b2WakeSolverSet( b2World* world, int setIndex )
 			B2_ASSERT( contactSim->simFlags & b2_simTouchingFlag );
 			B2_ASSERT( contactSim->manifold.pointCount > 0 );
 			B2_ASSERT( contact->setIndex == setIndex );
-			b2AddContactToGraph( world, contactSim, contact );
+			contact->localIndex = awakeSet->contactSims.count;
 			contact->setIndex = b2_awakeSet;
+			b2ContactSim* awakeContactSim = b2ContactSimArray_Add( &awakeSet->contactSims );
+			memcpy( awakeContactSim, contactSim, sizeof( b2ContactSim ) );
 		}
 	}
 
@@ -126,8 +127,10 @@ void b2WakeSolverSet( b2World* world, int setIndex )
 			b2JointSim* jointSim = set->jointSims.data + i;
 			b2Joint* joint = b2JointArray_Get( &world->joints, jointSim->jointId );
 			B2_ASSERT( joint->setIndex == setIndex );
-			b2AddJointToGraph( world, jointSim, joint );
+			joint->localIndex = awakeSet->jointSims.count;
 			joint->setIndex = b2_awakeSet;
+			b2JointSim* awakeJointSim = b2JointSimArray_Add( &awakeSet->jointSims );
+			memcpy( awakeJointSim, jointSim, sizeof( b2JointSim ) );
 		}
 	}
 
@@ -249,10 +252,9 @@ void b2TrySleepIsland( b2World* world, int islandId )
 					continue;
 				}
 
-				if ( contact->colorIndex != B2_NULL_INDEX )
+				if ( ( contact->flags & b2_contactTouchingFlag ) != 0 )
 				{
 					// contact is touching and will be moved separately
-					B2_ASSERT( ( contact->flags & b2_contactTouchingFlag ) != 0 );
 					continue;
 				}
 
@@ -300,38 +302,25 @@ void b2TrySleepIsland( b2World* world, int islandId )
 			b2Contact* contact = b2ContactArray_Get( &world->contacts, link->contactId );
 			B2_ASSERT( contact->setIndex == b2_awakeSet );
 			B2_ASSERT( contact->islandId == islandId );
-			int colorIndex = contact->colorIndex;
-			B2_ASSERT( 0 <= colorIndex && colorIndex < B2_GRAPH_COLOR_COUNT );
-
-			b2GraphColor* color = world->constraintGraph.colors + colorIndex;
-
-			// Remove bodies from graph coloring associated with this constraint
-			if ( colorIndex != B2_OVERFLOW_INDEX )
-			{
-				// might clear a bit for a static body, but this has no effect
-				b2ClearBit( &color->bodySet, contact->edges[0].bodyId );
-				b2ClearBit( &color->bodySet, contact->edges[1].bodyId );
-			}
 
 			int localIndex = contact->localIndex;
-			b2ContactSim* awakeContactSim = b2ContactSimArray_Get( &color->contactSims, localIndex );
+			b2ContactSim* awakeContactSim = b2ContactSimArray_Get( &awakeSet->contactSims, localIndex );
 
 			int sleepContactIndex = sleepSet->contactSims.count;
 			b2ContactSim* sleepContactSim = b2ContactSimArray_Add( &sleepSet->contactSims );
 			memcpy( sleepContactSim, awakeContactSim, sizeof( b2ContactSim ) );
 
-			int movedLocalIndex = b2ContactSimArray_RemoveSwap( &color->contactSims, localIndex );
+			int movedLocalIndex = b2ContactSimArray_RemoveSwap( &awakeSet->contactSims, localIndex );
 			if ( movedLocalIndex != B2_NULL_INDEX )
 			{
 				// fix moved element
-				b2ContactSim* movedContactSim = color->contactSims.data + localIndex;
+				b2ContactSim* movedContactSim = awakeSet->contactSims.data + localIndex;
 				b2Contact* movedContact = b2ContactArray_Get( &world->contacts, movedContactSim->contactId );
 				B2_ASSERT( movedContact->localIndex == movedLocalIndex );
 				movedContact->localIndex = localIndex;
 			}
 
 			contact->setIndex = sleepSetId;
-			contact->colorIndex = B2_NULL_INDEX;
 			contact->localIndex = sleepContactIndex;
 		}
 	}
@@ -345,31 +334,19 @@ void b2TrySleepIsland( b2World* world, int islandId )
 			b2Joint* joint = b2JointArray_Get( &world->joints, link->jointId );
 			B2_ASSERT( joint->setIndex == b2_awakeSet );
 			B2_ASSERT( joint->islandId == islandId );
-			int colorIndex = joint->colorIndex;
 			int localIndex = joint->localIndex;
 
-			B2_ASSERT( 0 <= colorIndex && colorIndex < B2_GRAPH_COLOR_COUNT );
-
-			b2GraphColor* color = world->constraintGraph.colors + colorIndex;
-
-			b2JointSim* awakeJointSim = b2JointSimArray_Get( &color->jointSims, localIndex );
-
-			if ( colorIndex != B2_OVERFLOW_INDEX )
-			{
-				// might clear a bit for a static body, but this has no effect
-				b2ClearBit( &color->bodySet, joint->edges[0].bodyId );
-				b2ClearBit( &color->bodySet, joint->edges[1].bodyId );
-			}
+			b2JointSim* awakeJointSim = b2JointSimArray_Get( &awakeSet->jointSims, localIndex );
 
 			int sleepJointIndex = sleepSet->jointSims.count;
 			b2JointSim* sleepJointSim = b2JointSimArray_Add( &sleepSet->jointSims );
 			memcpy( sleepJointSim, awakeJointSim, sizeof( b2JointSim ) );
 
-			int movedIndex = b2JointSimArray_RemoveSwap( &color->jointSims, localIndex );
+			int movedIndex = b2JointSimArray_RemoveSwap( &awakeSet->jointSims, localIndex );
 			if ( movedIndex != B2_NULL_INDEX )
 			{
 				// fix moved element
-				b2JointSim* movedJointSim = color->jointSims.data + localIndex;
+				b2JointSim* movedJointSim = awakeSet->jointSims.data + localIndex;
 				int movedId = movedJointSim->jointId;
 				b2Joint* movedJoint = b2JointArray_Get( &world->joints, movedId );
 				B2_ASSERT( movedJoint->localIndex == movedIndex );
@@ -377,7 +354,6 @@ void b2TrySleepIsland( b2World* world, int islandId )
 			}
 
 			joint->setIndex = sleepSetId;
-			joint->colorIndex = B2_NULL_INDEX;
 			joint->localIndex = sleepJointIndex;
 		}
 	}
@@ -553,54 +529,25 @@ void b2TransferJoint( b2World* world, b2SolverSet* targetSet, b2SolverSet* sourc
 	}
 
 	int localIndex = joint->localIndex;
-	int colorIndex = joint->colorIndex;
 
 	// Retrieve source.
-	b2JointSim* sourceSim;
-	if ( sourceSet->setIndex == b2_awakeSet )
-	{
-		B2_ASSERT( 0 <= colorIndex && colorIndex < B2_GRAPH_COLOR_COUNT );
-		b2GraphColor* color = world->constraintGraph.colors + colorIndex;
-
-		sourceSim = b2JointSimArray_Get( &color->jointSims, localIndex );
-	}
-	else
-	{
-		B2_ASSERT( colorIndex == B2_NULL_INDEX );
-		sourceSim = b2JointSimArray_Get( &sourceSet->jointSims, localIndex );
-	}
+	b2JointSim* sourceSim = b2JointSimArray_Get( &sourceSet->jointSims, localIndex );
 
 	// Create target and copy. Fix joint.
-	if ( targetSet->setIndex == b2_awakeSet )
-	{
-		b2AddJointToGraph( world, sourceSim, joint );
-		joint->setIndex = b2_awakeSet;
-	}
-	else
-	{
-		joint->setIndex = targetSet->setIndex;
-		joint->localIndex = targetSet->jointSims.count;
-		joint->colorIndex = B2_NULL_INDEX;
+	joint->setIndex = targetSet->setIndex;
+	joint->localIndex = targetSet->jointSims.count;
 
-		b2JointSim* targetSim = b2JointSimArray_Add( &targetSet->jointSims );
-		memcpy( targetSim, sourceSim, sizeof( b2JointSim ) );
-	}
+	b2JointSim* targetSim = b2JointSimArray_Add( &targetSet->jointSims );
+	memcpy( targetSim, sourceSim, sizeof( b2JointSim ) );
 
 	// Destroy source.
-	if ( sourceSet->setIndex == b2_awakeSet )
+	int movedIndex = b2JointSimArray_RemoveSwap( &sourceSet->jointSims, localIndex );
+	if ( movedIndex != B2_NULL_INDEX )
 	{
-		b2RemoveJointFromGraph( world, joint->edges[0].bodyId, joint->edges[1].bodyId, colorIndex, localIndex );
-	}
-	else
-	{
-		int movedIndex = b2JointSimArray_RemoveSwap( &sourceSet->jointSims, localIndex );
-		if ( movedIndex != B2_NULL_INDEX )
-		{
-			// fix swapped element
-			b2JointSim* movedJointSim = sourceSet->jointSims.data + localIndex;
-			int movedId = movedJointSim->jointId;
-			b2Joint* movedJoint = b2JointArray_Get( &world->joints, movedId );
-			movedJoint->localIndex = localIndex;
-		}
+		// fix swapped element
+		b2JointSim* movedJointSim = sourceSet->jointSims.data + localIndex;
+		int movedId = movedJointSim->jointId;
+		b2Joint* movedJoint = b2JointArray_Get( &world->joints, movedId );
+		movedJoint->localIndex = localIndex;
 	}
 }

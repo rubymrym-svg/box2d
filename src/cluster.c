@@ -6,7 +6,6 @@
 #include "arena_allocator.h"
 #include "array.h"
 #include "body.h"
-#include "constraint_graph.h"
 #include "contact.h"
 #include "contact_solver.h"
 #include "joint.h"
@@ -186,7 +185,6 @@ static inline int b2GetBorderIndex( int a, int b )
 
 void b2ClassifyConstraints( b2World* world, b2StepContext* context )
 {
-	b2ConstraintGraph* graph = &world->constraintGraph;
 	b2SolverSet* awakeSet = b2SolverSetArray_Get( &world->solverSets, b2_awakeSet );
 	b2BodySim* bodySims = awakeSet->bodySims.data;
 
@@ -198,16 +196,19 @@ void b2ClassifyConstraints( b2World* world, b2StepContext* context )
 	int borderContactCounts[B2_MAX_BORDERS] = { 0 };
 	int borderJointCounts[B2_MAX_BORDERS] = { 0 };
 
-	// First pass: count contacts per cluster/border across all graph colors
-	for ( int colorIndex = 0; colorIndex < B2_GRAPH_COLOR_COUNT - 1; ++colorIndex )
+	// First pass: count contacts per cluster/border
 	{
-		b2GraphColor* color = graph->colors + colorIndex;
-		int contactCount = color->contactSims.count;
-		b2ContactSim* contacts = color->contactSims.data;
+		int awakeContactCount = awakeSet->contactSims.count;
+		b2ContactSim* awakeContactSims = awakeSet->contactSims.data;
 
-		for ( int i = 0; i < contactCount; ++i )
+		for ( int i = 0; i < awakeContactCount; ++i )
 		{
-			b2ContactSim* contactSim = contacts + i;
+			b2ContactSim* contactSim = awakeContactSims + i;
+
+			// Skip non-touching contacts
+			if ( contactSim->manifold.pointCount == 0 )
+				continue;
+
 			int indexA = contactSim->bodySimIndexA;
 			int indexB = contactSim->bodySimIndexB;
 
@@ -239,16 +240,14 @@ void b2ClassifyConstraints( b2World* world, b2StepContext* context )
 		}
 	}
 
-	// First pass: count joints per cluster/border across all graph colors
-	for ( int colorIndex = 0; colorIndex < B2_GRAPH_COLOR_COUNT - 1; ++colorIndex )
+	// First pass: count joints per cluster/border
 	{
-		b2GraphColor* color = graph->colors + colorIndex;
-		int jointCount = color->jointSims.count;
-		b2JointSim* joints = color->jointSims.data;
+		int awakeJointCount = awakeSet->jointSims.count;
+		b2JointSim* awakeJointSims = awakeSet->jointSims.data;
 
-		for ( int i = 0; i < jointCount; ++i )
+		for ( int i = 0; i < awakeJointCount; ++i )
 		{
-			b2JointSim* jointSim = joints + i;
+			b2JointSim* jointSim = awakeJointSims + i;
 			int bodyIdA = jointSim->bodyIdA;
 			int bodyIdB = jointSim->bodyIdB;
 
@@ -382,15 +381,18 @@ void b2ClassifyConstraints( b2World* world, b2StepContext* context )
 	}
 
 	// Second pass: distribute contact pointers to clusters and borders
-	for ( int colorIndex = 0; colorIndex < B2_GRAPH_COLOR_COUNT - 1; ++colorIndex )
 	{
-		b2GraphColor* color = graph->colors + colorIndex;
-		int contactCount = color->contactSims.count;
-		b2ContactSim* contacts = color->contactSims.data;
+		int awakeContactCount = awakeSet->contactSims.count;
+		b2ContactSim* awakeContactSims = awakeSet->contactSims.data;
 
-		for ( int i = 0; i < contactCount; ++i )
+		for ( int i = 0; i < awakeContactCount; ++i )
 		{
-			b2ContactSim* contactSim = contacts + i;
+			b2ContactSim* contactSim = awakeContactSims + i;
+
+			// Skip non-touching contacts
+			if ( contactSim->manifold.pointCount == 0 )
+				continue;
+
 			int indexA = contactSim->bodySimIndexA;
 			int indexB = contactSim->bodySimIndexB;
 
@@ -426,15 +428,13 @@ void b2ClassifyConstraints( b2World* world, b2StepContext* context )
 	}
 
 	// Second pass: distribute joint pointers to clusters and borders
-	for ( int colorIndex = 0; colorIndex < B2_GRAPH_COLOR_COUNT - 1; ++colorIndex )
 	{
-		b2GraphColor* color = graph->colors + colorIndex;
-		int jointCount = color->jointSims.count;
-		b2JointSim* joints = color->jointSims.data;
+		int awakeJointCount = awakeSet->jointSims.count;
+		b2JointSim* awakeJointSims = awakeSet->jointSims.data;
 
-		for ( int i = 0; i < jointCount; ++i )
+		for ( int i = 0; i < awakeJointCount; ++i )
 		{
-			b2JointSim* jointSim = joints + i;
+			b2JointSim* jointSim = awakeJointSims + i;
 			int bodyIdA = jointSim->bodyIdA;
 			int bodyIdB = jointSim->bodyIdB;
 

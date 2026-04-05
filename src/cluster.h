@@ -35,6 +35,13 @@ typedef struct b2ClusterSolveData
 
 	b2ContactConstraint* contactConstraints;
 
+	// Per-cluster local body state array (compact, L1-friendly)
+	struct b2BodyState* localStates;
+	int bodyCount;
+
+	// Pointer to cluster's body indices (global awake sim indices)
+	int* bodyIndices;
+
 	// Signaled by the worker when this cluster's solve phase is done
 	b2AtomicInt solveComplete;
 
@@ -63,6 +70,7 @@ typedef struct b2BorderConstraints
 typedef struct b2ClusterManager
 {
 	b2Cluster clusters[B2_CLUSTER_COUNT];
+	bool initialized;
 } b2ClusterManager;
 
 void b2CreateClusters( b2ClusterManager* manager );

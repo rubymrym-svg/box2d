@@ -1054,6 +1054,33 @@ static void b2ExecuteMainStage( b2SolverStage* stage, b2StepContext* context, ui
 	}
 }
 
+// Gather body states from global array into cluster's compact local array for L1 cache locality.
+static void b2GatherClusterStates( b2ClusterSolveData* cd, b2BodyState* globalStates )
+{
+	int* indices = cd->bodyIndices;
+	b2BodyState* local = cd->localStates;
+	int bodyCount = cd->bodyCount;
+	for ( int k = 0; k < bodyCount; ++k )
+	{
+		local[k] = globalStates[indices[k]];
+	}
+}
+
+// Scatter body states from cluster's local array back to global array.
+static void b2ScatterClusterStates( b2ClusterSolveData* cd, b2BodyState* globalStates )
+{
+	int* indices = cd->bodyIndices;
+	b2BodyState* local = cd->localStates;
+	int bodyCount = cd->bodyCount;
+	for ( int k = 0; k < bodyCount; ++k )
+	{
+		if ( local[k].flags & b2_dynamicFlag )
+		{
+			globalStates[indices[k]] = local[k];
+		}
+	}
+}
+
 // Helper: main thread solves borders whose adjacent clusters are both complete.
 // Returns when all borders are solved.
 static void b2SolveBordersWhenReady( b2StepContext* context, b2BodyState* states, bool useBias, bool isRestitution,
@@ -1143,11 +1170,14 @@ static void b2SolveWorkerClusters( b2StepContext* context, int workerIndex, b2Bo
 
 		b2ClusterSolveData* cd = clusterData + c;
 
+		// Gather body states into compact local array for L1 cache locality
+		b2GatherClusterStates( cd, states );
+
 		if ( isRestitution )
 		{
 			if ( cd->contactCount > 0 )
 			{
-				b2ApplyContactRestitution( cd->contactConstraints, cd->contactCount, states,
+				b2ApplyContactRestitution( cd->contactConstraints, cd->contactCount, cd->localStates,
 										   context->world->restitutionThreshold );
 			}
 		}
@@ -1155,9 +1185,13 @@ static void b2SolveWorkerClusters( b2StepContext* context, int workerIndex, b2Bo
 		{
 			if ( cd->contactCount > 0 )
 			{
-				b2SolveContactConstraints( cd->contactConstraints, cd->contactCount, states, context->inv_h,
+				b2SolveContactConstraints( cd->contactConstraints, cd->contactCount, cd->localStates, context->inv_h,
 										   context->world->contactSpeed, useBias );
 			}
+
+			// Scatter back to global before solving joints (joints use global states via context)
+			b2ScatterClusterStates( cd, states );
+
 			for ( int k = 0; k < cd->jointCount; ++k )
 			{
 				b2SolveJoint( cd->joints[k], context, useBias );
@@ -1167,6 +1201,12 @@ static void b2SolveWorkerClusters( b2StepContext* context, int workerIndex, b2Bo
 			{
 				b2StoreContactImpulses( cd->contacts, cd->contactConstraints, cd->contactCount );
 			}
+		}
+
+		// Scatter for restitution path (no joints after restitution)
+		if ( isRestitution )
+		{
+			b2ScatterClusterStates( cd, states );
 		}
 
 		b2AtomicStoreInt( &cd->solveComplete, 1 );
@@ -1192,7 +1232,8 @@ static void b2PrepareWorkerClusters( b2StepContext* context, int workerIndex )
 
 		if ( cd->contactCount > 0 )
 		{
-			b2PrepareContactConstraints( cd->contacts, cd->contactConstraints, cd->contactCount, context );
+			// Pass bodySims to remap constraint indices to local cluster indices
+			b2PrepareContactConstraints( cd->contacts, cd->contactConstraints, cd->contactCount, context, context->sims );
 		}
 
 		for ( int j = 0; j < cd->jointCount; ++j )
@@ -1239,7 +1280,9 @@ static void b2PrepareBordersWhenReady( b2StepContext* context )
 			{
 				if ( border->contactCount > 0 )
 				{
-					b2PrepareContactConstraints( border->contacts, border->contactConstraints, border->contactCount, context );
+					// Borders use global indices (NULL bodySims)
+					b2PrepareContactConstraints( border->contacts, border->contactConstraints, border->contactCount, context,
+												 NULL );
 				}
 
 				for ( int j = 0; j < border->jointCount; ++j )
@@ -1308,10 +1351,16 @@ static void b2WarmStartWorkerClusters( b2StepContext* context, int workerIndex )
 
 		b2ClusterSolveData* cd = clusterData + c;
 
+		// Gather body states into compact local array
+		b2GatherClusterStates( cd, states );
+
 		if ( cd->contactCount > 0 )
 		{
-			b2WarmStartContactConstraints( cd->contactConstraints, cd->contactCount, states );
+			b2WarmStartContactConstraints( cd->contactConstraints, cd->contactCount, cd->localStates );
 		}
+
+		// Scatter back to global before warm starting joints (joints use global states)
+		b2ScatterClusterStates( cd, states );
 
 		for ( int k = 0; k < cd->jointCount; ++k )
 		{
@@ -2104,6 +2153,10 @@ void b2Solve( b2World* world, b2StepContext* stepContext )
 			for ( int i = B2_CLUSTER_COUNT - 1; i >= 0; --i )
 			{
 				b2ClusterSolveData* cd = clusterData + i;
+				if (cd->localStates != NULL)
+				{
+					b2FreeArenaItem( &world->arena, cd->localStates );
+				}
 				if ( cd->contactConstraints != NULL )
 				{
 					b2FreeArenaItem( &world->arena, cd->contactConstraints );

@@ -543,7 +543,8 @@ void b2StoreOverflowImpulses( b2StepContext* context )
 
 // Scalar constraint functions for cluster solver
 
-void b2PrepareContactConstraints( b2ContactSim** contacts, b2ContactConstraint* constraints, int count, b2StepContext* context )
+void b2PrepareContactConstraints( b2ContactSim** contacts, b2ContactConstraint* constraints, int count,
+								  b2StepContext* context, b2BodySim* bodySims )
 {
 	b2BodyState* awakeStates = context->states;
 	b2Softness contactSoftness = context->contactSoftness;
@@ -562,8 +563,19 @@ void b2PrepareContactConstraints( b2ContactSim** contacts, b2ContactConstraint* 
 		int indexB = contactSim->bodySimIndexB;
 
 		b2ContactConstraint* constraint = constraints + i;
-		constraint->indexA = indexA + 1;
-		constraint->indexB = indexB + 1;
+
+		// Remap to local cluster indices when bodySims is provided (cluster interior contacts).
+		// Borders pass NULL and use global indices.
+		if ( bodySims != NULL )
+		{
+			constraint->indexA = ( indexA != B2_NULL_INDEX ) ? bodySims[indexA].localClusterIndex + 1 : 0;
+			constraint->indexB = ( indexB != B2_NULL_INDEX ) ? bodySims[indexB].localClusterIndex + 1 : 0;
+		}
+		else
+		{
+			constraint->indexA = indexA + 1;
+			constraint->indexB = indexB + 1;
+		}
 		constraint->normal = manifold->normal;
 		constraint->friction = contactSim->friction;
 		constraint->restitution = contactSim->restitution;

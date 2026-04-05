@@ -5,6 +5,7 @@
 
 #include "solver.h"
 
+typedef struct b2BodySim b2BodySim;
 typedef struct b2ContactSim b2ContactSim;
 
 typedef struct b2ContactConstraintPoint
@@ -56,7 +57,7 @@ void b2StoreImpulsesTask( int startIndex, int endIndex, b2StepContext* context )
 
 // Scalar constraint functions for cluster solver (operate on arbitrary constraint arrays)
 void b2PrepareContactConstraints( b2ContactSim** contacts, b2ContactConstraint* constraints, int count,
-								  b2StepContext* context );
+								  b2StepContext* context, b2BodySim* bodySims );
 void b2WarmStartContactConstraints( b2ContactConstraint* constraints, int count, b2BodyState* states );
 void b2SolveContactConstraints( b2ContactConstraint* constraints, int count, b2BodyState* states, float inv_h,
 								float contactSpeed, bool useBias );

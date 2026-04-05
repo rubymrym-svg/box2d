@@ -200,6 +200,9 @@ typedef struct b2BodySim
 	// todo testing
 	int clusterIndex;
 
+	// Index of this body within its cluster's local body state array
+	int localClusterIndex;
+
 	// b2BodyFlags
 	uint32_t flags;
 } b2BodySim;

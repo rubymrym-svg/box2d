@@ -38,32 +38,85 @@ void b2DestroyClusters( b2ClusterManager* manager )
 
 void b2ComputeClusters( b2World* world )
 {
-	b2Cluster* clusters = world->clusterManager.clusters;
-
-	// Clear
-	for ( int i = 0; i < B2_CLUSTER_COUNT; ++i )
-	{
-		b2IntArray_Clear( &clusters[i].bodyIndices );
-	}
+	b2ClusterManager* manager = &world->clusterManager;
+	b2Cluster* clusters = manager->clusters;
 
 	b2SolverSet* awakeSet = b2SolverSetArray_Get( &world->solverSets, b2_awakeSet );
 	int awakeCount = awakeSet->bodySims.count;
 	b2BodySim* bodySims = awakeSet->bodySims.data;
 
-	int seedCount = b2MinInt( awakeCount, B2_CLUSTER_COUNT );
-	for ( int i = 0; i < seedCount; ++i )
+	for ( int i = 0; i < B2_CLUSTER_COUNT; ++i )
 	{
-		clusters[i].center = bodySims[i].center;
-		b2IntArray_Push( &clusters[i].bodyIndices, i );
-		bodySims[i].clusterIndex = i;
+		b2IntArray_Clear( &clusters[i].bodyIndices );
 	}
 
-	if ( awakeCount < B2_CLUSTER_COUNT )
+	if ( awakeCount == 0 )
 	{
 		return;
 	}
 
-	for ( int iteration = 0; iteration < 32; ++iteration )
+	// First-time or too few bodies: full k-means with seeding
+	if ( manager->initialized == false || awakeCount < B2_CLUSTER_COUNT )
+	{
+		int seedCount = b2MinInt( awakeCount, B2_CLUSTER_COUNT );
+		for ( int i = 0; i < seedCount; ++i )
+		{
+			clusters[i].center = bodySims[i].center;
+			b2IntArray_Push( &clusters[i].bodyIndices, i );
+			bodySims[i].clusterIndex = i;
+		}
+
+		if ( awakeCount < B2_CLUSTER_COUNT )
+		{
+			return;
+		}
+
+		for ( int iteration = 0; iteration < 32; ++iteration )
+		{
+			for ( int i = 0; i < B2_CLUSTER_COUNT; ++i )
+			{
+				clusters[i].accumulator = b2Vec2_zero;
+				clusters[i].bodyIndices.count = 0;
+			}
+
+			for ( int i = 0; i < awakeCount; ++i )
+			{
+				b2Vec2 p = bodySims[i].center;
+
+				float minDistanceSquared = b2DistanceSquared( p, clusters[0].center );
+				int bestIndex = 0;
+
+				for ( int j = 1; j < B2_CLUSTER_COUNT; ++j )
+				{
+					float distanceSquared = b2DistanceSquared( p, clusters[j].center );
+					if ( distanceSquared < minDistanceSquared )
+					{
+						minDistanceSquared = distanceSquared;
+						bestIndex = j;
+					}
+				}
+
+				bodySims[i].clusterIndex = bestIndex;
+				b2IntArray_Push( &clusters[bestIndex].bodyIndices, i );
+				clusters[bestIndex].accumulator = b2Add( clusters[bestIndex].accumulator, p );
+			}
+
+			for ( int i = 0; i < B2_CLUSTER_COUNT; ++i )
+			{
+				int clusterBodyCount = clusters[i].bodyIndices.count;
+				if ( clusterBodyCount > 0 )
+				{
+					clusters[i].center = b2MulSV( 1.0f / clusterBodyCount, clusters[i].accumulator );
+				}
+			}
+		}
+
+		manager->initialized = true;
+		return;
+	}
+
+	// Incremental: refine clusters using persistent centers
+	for ( int iteration = 0; iteration < 4; ++iteration )
 	{
 		for ( int i = 0; i < B2_CLUSTER_COUNT; ++i )
 		{
@@ -71,6 +124,7 @@ void b2ComputeClusters( b2World* world )
 			clusters[i].bodyIndices.count = 0;
 		}
 
+		// Assign each body to nearest cluster center
 		for ( int i = 0; i < awakeCount; ++i )
 		{
 			b2Vec2 p = bodySims[i].center;
@@ -93,12 +147,30 @@ void b2ComputeClusters( b2World* world )
 			clusters[bestIndex].accumulator = b2Add( clusters[bestIndex].accumulator, p );
 		}
 
+		// Update centers, handle empty clusters
 		for ( int i = 0; i < B2_CLUSTER_COUNT; ++i )
 		{
 			int clusterBodyCount = clusters[i].bodyIndices.count;
 			if ( clusterBodyCount > 0 )
 			{
 				clusters[i].center = b2MulSV( 1.0f / clusterBodyCount, clusters[i].accumulator );
+			}
+			else
+			{
+				// Re-seed empty cluster from body furthest from its assigned center
+				float maxDistanceSquared = -1.0f;
+				int maxBody = 0;
+				for ( int b = 0; b < awakeCount; ++b )
+				{
+					int ci = bodySims[b].clusterIndex;
+					float d = b2DistanceSquared( bodySims[b].center, clusters[ci].center );
+					if ( d > maxDistanceSquared )
+					{
+						maxDistanceSquared = d;
+						maxBody = b;
+					}
+				}
+				clusters[i].center = bodySims[maxBody].center;
 			}
 		}
 	}
@@ -213,9 +285,11 @@ void b2ClassifyConstraints( b2World* world, b2StepContext* context )
 	}
 
 	// Allocate cluster solve data arrays from arena
+	b2ClusterManager* manager = &world->clusterManager;
 	for ( int i = 0; i < B2_CLUSTER_COUNT; ++i )
 	{
 		b2ClusterSolveData* cd = context->clusterData + i;
+		b2Cluster* cluster = manager->clusters + i;
 
 		int cc = clusterContactCounts[i];
 		int jc = clusterJointCounts[i];
@@ -233,6 +307,21 @@ void b2ClassifyConstraints( b2World* world, b2StepContext* context )
 		cd->contactConstraints = ( cc > 0 )
 			? b2AllocateArenaItem( &world->arena, cc * sizeof( b2ContactConstraint ), "cluster contact constraints" )
 			: NULL;
+
+		// Allocate per-cluster local body state array for L1 cache locality
+		int bodyCount = cluster->bodyIndices.count;
+		cd->bodyCount = bodyCount;
+		cd->bodyIndices = cluster->bodyIndices.data;
+		cd->localStates = ( bodyCount > 0 )
+			? b2AllocateArenaItem( &world->arena, bodyCount * sizeof( b2BodyState ), "cluster local states" )
+			: NULL;
+
+		// Build reverse mapping: global awake index -> local cluster index
+		for ( int k = 0; k < bodyCount; ++k )
+		{
+			int globalIndex = cluster->bodyIndices.data[k];
+			bodySims[globalIndex].localClusterIndex = k;
+		}
 
 		b2AtomicStoreInt( &cd->solveComplete, 0 );
 	}

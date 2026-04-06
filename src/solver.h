@@ -11,8 +11,7 @@
 #include <stdbool.h>
 #include <stdint.h>
 
-typedef struct b2BodySim b2BodySim;
-typedef struct b2BodyState b2BodyState;
+typedef struct b2Body b2Body;
 typedef struct b2ContactSim b2ContactSim;
 typedef struct b2JointSim b2JointSim;
 typedef struct b2World b2World;
@@ -95,18 +94,14 @@ typedef struct b2StepContext
 
 	struct b2World* world;
 
-	// shortcut to body states from awake set
-	b2BodyState* states;
-
-	// shortcut to body sims from awake set
-	b2BodySim* sims;
+	struct b2BodyState* states;
 
 	// array of all shape ids for shapes that have enlarged AABBs
 	int* enlargedShapes;
 	int enlargedShapeCount;
 
 	// Array of bullet bodies that need continuous collision handling
-	int* bulletBodies;
+	b2Body** bulletBodies;
 	b2AtomicInt bulletBodyCount;
 
 	// joint pointers for simplified parallel-for access.

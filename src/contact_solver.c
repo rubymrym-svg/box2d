@@ -7,45 +7,31 @@
 #include "contact.h"
 #include "core.h"
 #include "physics_world.h"
-#include "solver_set.h"
 
 #include <stddef.h>
 
-// Scalar constraint functions for cluster solver
-
-void b2PrepareContactConstraints( b2ContactSim** contacts, b2ContactConstraint* constraints, int count,
-								  b2StepContext* context, b2BodySim* bodySims )
+void b2PrepareContactConstraints( b2StepContext* context, b2ContactSim** contacts, b2ContactConstraint* constraints, int count )
 {
-	b2BodyState* awakeStates = context->states;
-	b2Softness contactSoftness = context->contactSoftness;
-	b2Softness staticSoftness = context->staticSoftness;
 	b2World* world = context->world;
+	b2Body* bodies = world->bodies.data;
 	float warmStartScale = world->enableWarmStarting ? 1.0f : 0.0f;
+	b2BodyState* states = context->states;
 
 	for ( int i = 0; i < count; ++i )
 	{
 		b2ContactSim* contactSim = contacts[i];
+		b2Body* bodyA = bodies + contactSim->bodyIdA;
+		b2Body* bodyB = bodies + contactSim->bodyIdB;
+		int indexA = bodyA->stateIndex;
+		int indexB = bodyB->stateIndex;
+		 
 		const b2Manifold* manifold = &contactSim->manifold;
 		int pointCount = manifold->pointCount;
 		B2_ASSERT( 0 < pointCount && pointCount <= 2 );
 
-		int indexA = contactSim->bodySimIndexA;
-		int indexB = contactSim->bodySimIndexB;
-
 		b2ContactConstraint* constraint = constraints + i;
-
-		// Remap to local cluster indices when bodySims is provided (cluster interior contacts).
-		// Borders pass NULL and use global indices.
-		if ( bodySims != NULL )
-		{
-			constraint->indexA = ( indexA != B2_NULL_INDEX ) ? bodySims[indexA].localClusterIndex + 1 : 0;
-			constraint->indexB = ( indexB != B2_NULL_INDEX ) ? bodySims[indexB].localClusterIndex + 1 : 0;
-		}
-		else
-		{
-			constraint->indexA = indexA + 1;
-			constraint->indexB = indexB + 1;
-		}
+		constraint->indexA = indexA;
+		constraint->indexB = indexB;
 		constraint->normal = manifold->normal;
 		constraint->friction = contactSim->friction;
 		constraint->restitution = contactSim->restitution;
@@ -60,7 +46,7 @@ void b2PrepareContactConstraints( b2ContactSim** contacts, b2ContactConstraint* 
 		float iA = contactSim->invIA;
 		if ( indexA != B2_NULL_INDEX )
 		{
-			b2BodyState* stateA = awakeStates + indexA;
+			b2BodyState* stateA = states + indexA;
 			vA = stateA->linearVelocity;
 			wA = stateA->angularVelocity;
 		}
@@ -71,12 +57,11 @@ void b2PrepareContactConstraints( b2ContactSim** contacts, b2ContactConstraint* 
 		float iB = contactSim->invIB;
 		if ( indexB != B2_NULL_INDEX )
 		{
-			b2BodyState* stateB = awakeStates + indexB;
+			b2BodyState* stateB = states + indexB;
 			vB = stateB->linearVelocity;
 			wB = stateB->angularVelocity;
 		}
 
-		constraint->softness = ( indexA == B2_NULL_INDEX || indexB == B2_NULL_INDEX ) ? staticSoftness : contactSoftness;
 		constraint->invMassA = mA;
 		constraint->invIA = iA;
 		constraint->invMassB = mB;
@@ -122,8 +107,9 @@ void b2PrepareContactConstraints( b2ContactSim** contacts, b2ContactConstraint* 
 	}
 }
 
-void b2WarmStartContactConstraints( b2ContactConstraint* constraints, int count, b2BodyState* states )
+void b2WarmStartContactConstraints( b2StepContext* context, b2ContactConstraint* constraints, int count )
 {
+	b2BodyState* states = context->states;
 	b2BodyState dummyState = b2_identityBodyState;
 
 	for ( int i = 0; i < count; ++i )
@@ -182,14 +168,19 @@ void b2WarmStartContactConstraints( b2ContactConstraint* constraints, int count,
 	}
 }
 
-void b2SolveContactConstraints( b2ContactConstraint* constraints, int count, b2BodyState* states, float inv_h, float contactSpeed,
-								bool useBias )
+void b2SolveContactConstraints( b2StepContext* context, b2ContactConstraint* constraints, int count, float inv_h, float contactSpeed,
+									   bool useBias )
 {
 	b2BodyState dummyState = b2_identityBodyState;
+
+	b2Softness contactSoftness = context->contactSoftness;
+	b2Softness staticSoftness = context->staticSoftness;
+	b2BodyState* states = context->states;
 
 	for ( int i = 0; i < count; ++i )
 	{
 		b2ContactConstraint* constraint = constraints + i;
+
 		float mA = constraint->invMassA;
 		float iA = constraint->invIA;
 		float mB = constraint->invMassB;
@@ -213,7 +204,7 @@ void b2SolveContactConstraints( b2ContactConstraint* constraints, int count, b2B
 		b2Vec2 normal = constraint->normal;
 		b2Vec2 tangent = b2RightPerp( normal );
 		float friction = constraint->friction;
-		b2Softness softness = constraint->softness;
+		b2Softness softness = ( indexA == B2_NULL_INDEX || indexB == B2_NULL_INDEX ) ? staticSoftness : contactSoftness;
 
 		int pointCount = constraint->pointCount;
 		float totalNormalImpulse = 0.0f;

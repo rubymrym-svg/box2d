@@ -5,21 +5,26 @@
 
 #include "array.h"
 #include "atomic.h"
+#include "container.h"
+
 #include "box2d/constants.h"
 #include "box2d/math_functions.h"
 
+typedef struct b2BodyState b2BodyState;
 typedef struct b2ContactConstraint b2ContactConstraint;
 typedef struct b2ContactSim b2ContactSim;
 typedef struct b2JointSim b2JointSim;
 typedef struct b2StepContext b2StepContext;
 typedef struct b2World b2World;
 
+b2DeclareArray( b2BodyState );
+
 // Maximum number of cluster pair borders: C(16,2) = 120
 #define B2_MAX_BORDERS ( B2_CLUSTER_COUNT * ( B2_CLUSTER_COUNT - 1 ) / 2 )
 
 typedef struct b2Cluster
 {
-	b2IntArray bodyIndices;
+	b2ArrayC( int ) bodyIds;
 	b2Vec2 center;
 	b2Vec2 accumulator;
 } b2Cluster;
@@ -35,12 +40,13 @@ typedef struct b2ClusterSolveData
 
 	b2ContactConstraint* contactConstraints;
 
-	// Per-cluster local body state array (compact, L1-friendly)
-	struct b2BodyState* localStates;
 	int bodyCount;
 
-	// Pointer to cluster's body indices (global awake sim indices)
-	int* bodyIndices;
+	// Pointer to cluster's body ids
+	int* bodyIds;
+
+	// Pointer to sub-array in b2StepContext::states
+	b2BodyState* states;
 
 	// Signaled by the worker when this cluster's solve phase is done
 	b2AtomicInt solveComplete;
@@ -76,7 +82,7 @@ typedef struct b2ClusterManager
 void b2CreateClusters( b2ClusterManager* manager );
 void b2DestroyClusters( b2ClusterManager* manager );
 
-void b2ComputeClusters( b2World* world );
+void b2ComputeClusters( b2World* world, b2StepContext* context );
 
 // Classify all awake touching contacts and joints into cluster interiors and borders.
 // Allocates from the arena; data is transient for this step.

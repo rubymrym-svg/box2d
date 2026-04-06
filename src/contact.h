@@ -104,14 +104,8 @@ typedef struct b2ContactSim
 	b2Transform cachedTransformA;
 	b2Transform cachedTransformB;
 
-#if B2_ENABLE_VALIDATION
 	int bodyIdA;
 	int bodyIdB;
-#endif
-
-	// Transient body indices
-	int bodySimIndexA;
-	int bodySimIndexB;
 
 	int shapeIdA;
 	int shapeIdB;

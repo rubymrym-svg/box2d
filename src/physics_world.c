@@ -795,7 +795,7 @@ void b2World_Step( b2WorldId worldId, float timeStep, int subStepCount )
 	}
 
 	// Compute spatial clusters before solving so constraint classification can read clusterIndex
-	b2ComputeClusters( world );
+	b2ComputeClusters( world, &context );
 
 	// Integrate velocities, solve velocity constraints, and integrate positions.
 	if ( timeStep > 0.0f )
@@ -1724,7 +1724,7 @@ b2Counters b2World_GetCounters( b2WorldId worldId )
 
 	for (int i = 0; i < B2_CLUSTER_COUNT; ++i)
 	{
-		s.clusterCounts[i] = world->clusterManager.clusters[i].bodyIndices.count;
+		s.clusterCounts[i] = world->clusterManager.clusters[i].bodyIds.count;
 	}
 
 	return s;

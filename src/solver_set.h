@@ -4,6 +4,7 @@
 #pragma once
 
 #include "array.h"
+#include "container.h"
 
 typedef struct b2Body b2Body;
 typedef struct b2Joint b2Joint;
@@ -37,17 +38,11 @@ enum b2SolverSetType
 // https://www.youtube.com/watch?v=nZNd5FjSquk
 typedef struct b2SolverSet
 {
-	// Body array. Empty for unused set.
-	b2BodySimArray bodySims;
+	// Body array.
+	b2ArrayC(int) bodyIds;
 
-	// Body state only exists for active set
-	b2BodyStateArray bodyStates;
-
-	// This holds sleeping/disabled joints. Empty for static/active set.
 	b2JointSimArray jointSims;
 
-	// This holds all contacts for sleeping sets.
-	// This holds non-touching contacts for the awake set.
 	b2ContactSimArray contactSims;
 
 	// The awake set has an array of islands. Sleeping sets normally have a single islands. However, joints

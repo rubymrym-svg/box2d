@@ -17,8 +17,7 @@ B2_ARRAY_SOURCE( b2SolverSet, b2SolverSet )
 void b2DestroySolverSet( b2World* world, int setIndex )
 {
 	b2SolverSet* set = b2SolverSetArray_Get( &world->solverSets, setIndex );
-	b2BodySimArray_Destroy( &set->bodySims );
-	b2BodyStateArray_Destroy( &set->bodyStates );
+	b2Array_Destroy( set->bodyIds );
 	b2ContactSimArray_Destroy( &set->contactSims );
 	b2JointSimArray_Destroy( &set->jointSims );
 	b2IslandSimArray_Destroy( &set->islandSims );
@@ -42,25 +41,19 @@ void b2WakeSolverSet( b2World* world, int setIndex )
 
 	b2Body* bodies = world->bodies.data;
 
-	int bodyCount = set->bodySims.count;
+	int bodyCount = set->bodyIds.count;
 	for ( int i = 0; i < bodyCount; ++i )
 	{
-		b2BodySim* simSrc = set->bodySims.data + i;
-
-		b2Body* body = bodies + simSrc->bodyId;
+		int bodyId = set->bodyIds.data[i];
+		b2Body* body = bodies + bodyId;
 		B2_ASSERT( body->setIndex == setIndex );
 		body->setIndex = b2_awakeSet;
-		body->localIndex = awakeSet->bodySims.count;
+		body->localIndex = awakeSet->bodyIds.count;
 
 		// Reset sleep timer
 		body->sleepTime = 0.0f;
 
-		b2BodySim* simDst = b2BodySimArray_Add( &awakeSet->bodySims );
-		memcpy( simDst, simSrc, sizeof( b2BodySim ) );
-
-		b2BodyState* state = b2BodyStateArray_Add( &awakeSet->bodyStates );
-		*state = b2_identityBodyState;
-		state->flags = body->flags;
+		b2Array_Push( awakeSet->bodyIds, bodyId );
 
 		// move non-touching contacts from disabled set to awake set
 		int contactKey = body->headContactKey;
@@ -190,7 +183,7 @@ void b2TrySleepIsland( b2World* world, int islandId )
 	B2_ASSERT( 0 <= island->localIndex && island->localIndex < awakeSet->islandSims.count );
 
 	sleepSet->setIndex = sleepSetId;
-	sleepSet->bodySims = b2BodySimArray_Create( island->bodies.count );
+	b2Array_CreateN( sleepSet->bodyIds, island->bodies.count );
 	sleepSet->contactSims = b2ContactSimArray_Create( island->contacts.count );
 	sleepSet->jointSims = b2JointSimArray_Create( island->joints.count );
 
@@ -218,17 +211,12 @@ void b2TrySleepIsland( b2World* world, int islandId )
 			}
 
 			int awakeBodyIndex = body->localIndex;
-			b2BodySim* awakeSim = b2BodySimArray_Get( &awakeSet->bodySims, awakeBodyIndex );
 
 			// move body sim to sleep set
-			int sleepBodyIndex = sleepSet->bodySims.count;
-			b2BodySim* sleepBodySim = b2BodySimArray_Add( &sleepSet->bodySims );
-			memcpy( sleepBodySim, awakeSim, sizeof( b2BodySim ) );
+			int sleepBodyIndex = sleepSet->bodyIds.count;
+			b2Array_Push( sleepSet->bodyIds, bodyId );
 
-			b2RemoveBodySim( &awakeSet->bodySims, &world->bodies, awakeBodyIndex );
-
-			// destroy state, no need to clone
-			(void)b2BodyStateArray_RemoveSwap( &awakeSet->bodyStates, awakeBodyIndex );
+			b2RemoveBodyFromSet( awakeSet, &world->bodies, awakeBodyIndex );
 
 			body->setIndex = sleepSetId;
 			body->localIndex = sleepBodyIndex;
@@ -400,7 +388,7 @@ void b2MergeSolverSets( b2World* world, int setId1, int setId2 )
 	b2SolverSet* set2 = b2SolverSetArray_Get( &world->solverSets, setId2 );
 
 	// Move the fewest number of bodies
-	if ( set1->bodySims.count < set2->bodySims.count )
+	if ( set1->bodyIds.count < set2->bodyIds.count )
 	{
 		b2SolverSet* tempSet = set1;
 		set1 = set2;
@@ -411,21 +399,19 @@ void b2MergeSolverSets( b2World* world, int setId1, int setId2 )
 		setId2 = tempId;
 	}
 
-	// transfer bodies
+	// transfer bodies from set2 to set1
 	{
 		b2Body* bodies = world->bodies.data;
-		int bodyCount = set2->bodySims.count;
+		int bodyCount = set2->bodyIds.count;
 		for ( int i = 0; i < bodyCount; ++i )
 		{
-			b2BodySim* simSrc = set2->bodySims.data + i;
+			int bodyId = set2->bodyIds.data[i];
 
-			b2Body* body = bodies + simSrc->bodyId;
+			b2Body* body = bodies + bodyId;
 			B2_ASSERT( body->setIndex == setId2 );
 			body->setIndex = setId1;
-			body->localIndex = set1->bodySims.count;
-
-			b2BodySim* simDst = b2BodySimArray_Add( &set1->bodySims );
-			memcpy( simDst, simSrc, sizeof( b2BodySim ) );
+			body->localIndex = set1->bodyIds.count;
+			b2Array_Push( set1->bodyIds, bodyId );
 		}
 	}
 
@@ -494,28 +480,14 @@ void b2TransferBody( b2World* world, b2SolverSet* targetSet, b2SolverSet* source
 	}
 
 	int sourceIndex = body->localIndex;
-	b2BodySim* sourceSim = b2BodySimArray_Get( &sourceSet->bodySims, sourceIndex );
 
-	int targetIndex = targetSet->bodySims.count;
-	b2BodySim* targetSim = b2BodySimArray_Add( &targetSet->bodySims );
-	memcpy( targetSim, sourceSim, sizeof( b2BodySim ) );
+	int targetIndex = targetSet->bodyIds.count;
+	b2Array_Push( targetSet->bodyIds, body->id );
 
-	// Clear transient body flags
-	targetSim->flags &= ~(b2_isFast | b2_isSpeedCapped | b2_hadTimeOfImpact);
+	body->flags &= ~(b2_isFast | b2_isSpeedCapped | b2_hadTimeOfImpact);
 
-	// Remove body sim from solver set that owns it
-	b2RemoveBodySim( &sourceSet->bodySims, &world->bodies, sourceIndex );
-
-	if ( sourceSet->setIndex == b2_awakeSet )
-	{
-		(void)b2BodyStateArray_RemoveSwap( &sourceSet->bodyStates, sourceIndex );
-	}
-	else if ( targetSet->setIndex == b2_awakeSet )
-	{
-		b2BodyState* state = b2BodyStateArray_Add( &targetSet->bodyStates );
-		*state = b2_identityBodyState;
-		state->flags = body->flags;
-	}
+	// Remove body index from source solver set
+	b2RemoveBodyFromSet( sourceSet, &world->bodies, sourceIndex );
 
 	body->setIndex = targetSet->setIndex;
 	body->localIndex = targetIndex;

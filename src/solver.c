@@ -68,9 +68,7 @@ static void b2IntegrateVelocitiesTask( int startIndex, int endIndex, b2StepConte
 	b2TracyCZoneNC( integrate_velocity, "IntVel", b2_colorDeepPink, true );
 
 	b2BodyState* states = context->states;
-	b2BodySim* sims = context->sims;
 
-	b2Vec2 gravity = context->world->gravity;
 	float h = context->h;
 	float maxLinearSpeed = context->maxLinearVelocity;
 	float maxAngularSpeed = B2_MAX_ROTATION * context->inv_dt;
@@ -79,12 +77,12 @@ static void b2IntegrateVelocitiesTask( int startIndex, int endIndex, b2StepConte
 
 	for ( int i = startIndex; i < endIndex; ++i )
 	{
-		b2BodySim* sim = sims + i;
 		b2BodyState* state = states + i;
 
 		b2Vec2 v = state->linearVelocity;
 		float w = state->angularVelocity;
 
+		// todo disabling damping to save space
 		// Apply forces, torque, gravity, and damping
 		// Apply damping.
 		// Differential equation: dv/dt + c * v = 0
@@ -93,33 +91,26 @@ static void b2IntegrateVelocitiesTask( int startIndex, int endIndex, b2StepConte
 		// v2 = exp(-c * dt) * v1
 		// Pade approximation:
 		// v2 = v1 * 1 / (1 + c * dt)
-		float linearDamping = 1.0f / ( 1.0f + h * sim->linearDamping );
-		float angularDamping = 1.0f / ( 1.0f + h * sim->angularDamping );
+		//float linearDamping = 1.0f / ( 1.0f + h * sim->linearDamping );
+		//float angularDamping = 1.0f / ( 1.0f + h * sim->angularDamping );
 
-		// Gravity scale will be zero for kinematic bodies
-		float gravityScale = sim->invMass > 0.0f ? sim->gravityScale : 0.0f;
-
-		// lvd = h * im * f + h * g
-		b2Vec2 linearVelocityDelta = b2Add( b2MulSV( h * sim->invMass, sim->force ), b2MulSV( h * gravityScale, gravity ) );
-		float angularVelocityDelta = h * sim->invInertia * sim->torque;
-
-		v = b2MulAdd( linearVelocityDelta, linearDamping, v );
-		w = angularVelocityDelta + angularDamping * w;
+		v = b2MulAdd( v, h * state->invMass, state->force );
+		w += h * state->invInertia * state->torque;
 
 		// Clamp to max linear speed
 		if ( b2Dot( v, v ) > maxLinearSpeedSquared )
 		{
 			float ratio = maxLinearSpeed / b2Length( v );
 			v = b2MulSV( ratio, v );
-			sim->flags |= b2_isSpeedCapped;
+			state->flags |= b2_isSpeedCapped;
 		}
 
 		// Clamp to max angular speed
-		if ( w * w > maxAngularSpeedSquared && ( sim->flags & b2_allowFastRotation ) == 0 )
+		if ( w * w > maxAngularSpeedSquared && ( state->flags & b2_allowFastRotation ) == 0 )
 		{
 			float ratio = maxAngularSpeed / b2AbsFloat( w );
 			w *= ratio;
-			sim->flags |= b2_isSpeedCapped;
+			state->flags |= b2_isSpeedCapped;
 		}
 
 		if ( state->flags & b2_lockLinearX )
@@ -200,7 +191,7 @@ static void b2IntegratePositionsTask( int startIndex, int endIndex, b2StepContex
 struct b2ContinuousContext
 {
 	b2World* world;
-	b2BodySim* fastBodySim;
+	b2Body* fastBody;
 	b2Shape* fastShape;
 	b2Vec2 centroid1, centroid2;
 	b2Sweep sweep;
@@ -221,7 +212,7 @@ static bool b2ContinuousQueryCallback( int proxyId, uint64_t userData, void* con
 
 	struct b2ContinuousContext* continuousContext = context;
 	b2Shape* fastShape = continuousContext->fastShape;
-	b2BodySim* fastBodySim = continuousContext->fastBodySim;
+	b2Body* fastBody = continuousContext->fastBody;
 
 	B2_ASSERT( fastShape->sensorIndex == B2_NULL_INDEX );
 
@@ -258,17 +249,15 @@ static bool b2ContinuousQueryCallback( int proxyId, uint64_t userData, void* con
 
 	b2Body* body = b2BodyArray_Get( &world->bodies, shape->bodyId );
 
-	b2BodySim* bodySim = b2GetBodySim( world, body );
-	B2_ASSERT( body->type == b2_staticBody || ( fastBodySim->flags & b2_isBullet ) );
+	B2_ASSERT( body->type == b2_staticBody || ( fastBody->flags & b2_isBullet ) );
 
 	// Skip bullets
-	if ( bodySim->flags & b2_isBullet )
+	if ( body->flags & b2_isBullet )
 	{
 		return true;
 	}
 
 	// Skip filtered bodies
-	b2Body* fastBody = b2BodyArray_Get( &world->bodies, fastBodySim->bodyId );
 	canCollide = b2ShouldBodiesCollide( world, fastBody, body );
 	if ( canCollide == false )
 	{
@@ -294,7 +283,7 @@ static bool b2ContinuousQueryCallback( int proxyId, uint64_t userData, void* con
 	// Early out on fast parallel movement over a chain shape.
 	if ( shape->type == b2_chainSegmentShape )
 	{
-		b2Transform transform = bodySim->transform;
+		b2Transform transform = body->transform;
 		b2Vec2 p1 = b2TransformPoint( transform, shape->chainSegment.segment.point1 );
 		b2Vec2 p2 = b2TransformPoint( transform, shape->chainSegment.segment.point2 );
 		b2Vec2 e = b2Sub( p2, p1 );
@@ -347,7 +336,7 @@ static bool b2ContinuousQueryCallback( int proxyId, uint64_t userData, void* con
 	b2TOIInput input;
 	input.proxyA = b2MakeShapeDistanceProxy( shape );
 	input.proxyB = b2MakeShapeDistanceProxy( fastShape );
-	input.sweepA = b2MakeSweep( bodySim );
+	input.sweepA = b2MakeSweep( body );
 	input.sweepB = continuousContext->sweep;
 	input.maxFraction = continuousContext->fraction;
 
@@ -404,7 +393,7 @@ static bool b2ContinuousQueryCallback( int proxyId, uint64_t userData, void* con
 
 		if ( didHit )
 		{
-			fastBodySim->flags |= b2_hadTimeOfImpact;
+			fastBody->flags |= b2_hadTimeOfImpact;
 			continuousContext->fraction = hitFraction;
 		}
 	}
@@ -413,15 +402,13 @@ static bool b2ContinuousQueryCallback( int proxyId, uint64_t userData, void* con
 	return true;
 }
 
-static void b2SolveContinuous( b2World* world, int bodySimIndex, b2TaskContext* taskContext )
+static void b2SolveContinuous( b2World* world, b2Body* fastBody, b2TaskContext* taskContext )
 {
 	b2TracyCZoneNC( ccd, "CCD", b2_colorDarkGoldenRod, true );
 
 	b2SolverSet* awakeSet = b2SolverSetArray_Get( &world->solverSets, b2_awakeSet );
-	b2BodySim* fastBodySim = b2BodySimArray_Get( &awakeSet->bodySims, bodySimIndex );
-	B2_ASSERT( fastBodySim->flags & b2_isFast );
 
-	b2Sweep sweep = b2MakeSweep( fastBodySim );
+	b2Sweep sweep = b2MakeSweep( fastBody );
 
 	b2Transform xf1;
 	xf1.q = sweep.q1;
@@ -434,15 +421,14 @@ static void b2SolveContinuous( b2World* world, int bodySimIndex, b2TaskContext* 
 	b2DynamicTree* staticTree = world->broadPhase.trees + b2_staticBody;
 	b2DynamicTree* kinematicTree = world->broadPhase.trees + b2_kinematicBody;
 	b2DynamicTree* dynamicTree = world->broadPhase.trees + b2_dynamicBody;
-	b2Body* fastBody = b2BodyArray_Get( &world->bodies, fastBodySim->bodyId );
 
 	struct b2ContinuousContext context = { 0 };
 	context.world = world;
 	context.sweep = sweep;
-	context.fastBodySim = fastBodySim;
+	context.fastBody = fastBody;
 	context.fraction = 1.0f;
 
-	bool isBullet = ( fastBodySim->flags & b2_isBullet ) != 0;
+	bool isBullet = ( fastBody->flags & b2_isBullet ) != 0;
 
 	int shapeId = fastBody->headShapeId;
 	while ( shapeId != B2_NULL_INDEX )
@@ -488,13 +474,13 @@ static void b2SolveContinuous( b2World* world, int bodySimIndex, b2TaskContext* 
 
 		// Advance body
 		b2Transform transform = { origin, q };
-		fastBodySim->transform = transform;
-		fastBodySim->center = c;
-		fastBodySim->rotation0 = q;
-		fastBodySim->center0 = c;
+		fastBody->transform = transform;
+		fastBody->center = c;
+		fastBody->rotation0 = q;
+		fastBody->center0 = c;
 
 		// Update body move event
-		b2BodyMoveEvent* event = b2BodyMoveEventArray_Get( &world->bodyMoveEvents, bodySimIndex );
+		b2BodyMoveEvent* event = b2BodyMoveEventArray_Get( &world->bodyMoveEvents, fastBody->localIndex );
 		event->transform = transform;
 
 		// Prepare AABBs for broad-phase.
@@ -699,7 +685,7 @@ static void b2FinalizeBodiesTask( int startIndex, int endIndex, uint32_t threadI
 				}
 				else
 				{
-					b2SolveContinuous( world, simIndex, taskContext );
+					b2SolveContinuous( world, body, taskContext );
 				}
 			}
 			else
@@ -928,7 +914,7 @@ static void b2ExecuteMainStage( b2SolverStage* stage, b2StepContext* context, ui
 // Gather body states from global array into cluster's compact local array for L1 cache locality.
 static void b2GatherClusterStates( b2ClusterSolveData* cd, b2BodyState* globalStates )
 {
-	int* indices = cd->bodyIndices;
+	int* indices = cd->bodyIds;
 	b2BodyState* local = cd->localStates;
 	int bodyCount = cd->bodyCount;
 	for ( int k = 0; k < bodyCount; ++k )
@@ -940,7 +926,7 @@ static void b2GatherClusterStates( b2ClusterSolveData* cd, b2BodyState* globalSt
 // Scatter body states from cluster's local array back to global array.
 static void b2ScatterClusterStates( b2ClusterSolveData* cd, b2BodyState* globalStates )
 {
-	int* indices = cd->bodyIndices;
+	int* indices = cd->bodyIds;
 	b2BodyState* local = cd->localStates;
 	int bodyCount = cd->bodyCount;
 	for ( int k = 0; k < bodyCount; ++k )
@@ -1583,8 +1569,7 @@ static void b2BulletBodyTask( int startIndex, int endIndex, uint32_t threadIndex
 
 	for ( int i = startIndex; i < endIndex; ++i )
 	{
-		int simIndex = stepContext->bulletBodies[i];
-		b2SolveContinuous( stepContext->world, simIndex, taskContext );
+		b2SolveContinuous( stepContext->world, stepContext->bulletBodies[i], taskContext );
 	}
 
 	b2TracyCZoneEnd( bullet_body_task );
@@ -1605,7 +1590,7 @@ void b2Solve( b2World* world, b2StepContext* stepContext )
 
 	// Are there any awake bodies? This scenario should not be important for profiling.
 	b2SolverSet* awakeSet = b2SolverSetArray_Get( &world->solverSets, b2_awakeSet );
-	int awakeBodyCount = awakeSet->bodySims.count;
+	int awakeBodyCount = awakeSet->bodyIds.count;
 	if ( awakeBodyCount == 0 )
 	{
 		// Nothing to simulate, however the tree rebuild must be finished.

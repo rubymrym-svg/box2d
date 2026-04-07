@@ -17,8 +17,8 @@
 #define TracyCFrameMark
 #endif
 
-#define EXPECTED_SLEEP_STEP 293
-#define EXPECTED_HASH 0x2FF98AC6
+#define EXPECTED_SLEEP_STEP 266
+#define EXPECTED_HASH 0x31A73FE8
 
 enum
 {
@@ -165,8 +165,8 @@ static int CrossPlatformTest( void )
 		done = UpdateFallingHinges( worldId, &data );
 	}
 
-	//ENSURE( data.sleepStep == EXPECTED_SLEEP_STEP );
-	//ENSURE( data.hash == EXPECTED_HASH );
+	ENSURE( data.sleepStep == EXPECTED_SLEEP_STEP );
+	ENSURE( data.hash == EXPECTED_HASH );
 
 	DestroyFallingHinges( &data );
 

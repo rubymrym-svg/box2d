@@ -57,6 +57,7 @@ int main( void )
 	RUN_TEST( BitSetTest );
 	RUN_TEST( CollisionTest );
 	RUN_TEST( ContainerTest );
+	// todo infinite loop
 	// RUN_TEST( DeterminismTest );
 	RUN_TEST( DistanceTest );
 	RUN_TEST( DynamicTreeTest );

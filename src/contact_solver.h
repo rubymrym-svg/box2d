@@ -22,9 +22,8 @@ typedef struct b2ContactConstraintPoint
 
 typedef struct b2ContactConstraint
 {
-	// base-1, 0 for null
-	int indexA;
-	int indexB;
+	int stateIndexA;
+	int stateIndexB;
 	b2ContactConstraintPoint points[2];
 	b2Vec2 normal;
 	float friction;

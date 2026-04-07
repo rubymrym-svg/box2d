@@ -29,8 +29,8 @@ void b2PrepareContactConstraints( b2StepContext* context, b2ContactSim** contact
 		B2_ASSERT( 0 < pointCount && pointCount <= 2 );
 
 		b2ContactConstraint* constraint = constraints + i;
-		constraint->indexA = indexA;
-		constraint->indexB = indexB;
+		constraint->stateIndexA = indexA;
+		constraint->stateIndexB = indexB;
 		constraint->normal = manifold->normal;
 		constraint->friction = contactSim->friction;
 		constraint->restitution = contactSim->restitution;
@@ -98,8 +98,8 @@ void b2WarmStartContactConstraints( b2StepContext* context, b2ContactConstraint*
 	{
 		b2ContactConstraint* constraint = constraints + i;
 
-		int indexA = constraint->indexA;
-		int indexB = constraint->indexB;
+		int indexA = constraint->stateIndexA;
+		int indexB = constraint->stateIndexB;
 
 		b2BodyState* stateA = indexA == B2_NULL_INDEX ? &dummyState : states + indexA;
 		b2BodyState* stateB = indexB == B2_NULL_INDEX ? &dummyState : states + indexB;
@@ -163,8 +163,8 @@ void b2SolveContactConstraints( b2StepContext* context, b2ContactConstraint* con
 	{
 		b2ContactConstraint* constraint = constraints + i;
 
-		int indexA = constraint->indexA;
-		int indexB = constraint->indexB;
+		int indexA = constraint->stateIndexA;
+		int indexB = constraint->stateIndexB;
 
 		b2BodyState* stateA = indexA == B2_NULL_INDEX ? &dummyState : states + indexA;
 		b2Vec2 vA = stateA->linearVelocity;
@@ -298,8 +298,8 @@ void b2ApplyContactRestitution( b2StepContext* context, b2ContactConstraint* con
 			continue;
 		}
 
-		int indexA = constraint->indexA;
-		int indexB = constraint->indexB;
+		int indexA = constraint->stateIndexA;
+		int indexB = constraint->stateIndexB;
 
 		b2BodyState* stateA = indexA == B2_NULL_INDEX ? &dummyState : states + indexA;
 		b2Vec2 vA = stateA->linearVelocity;

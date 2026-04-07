@@ -414,11 +414,6 @@ void b2SolveWeldJoint( b2JointSim* base, b2StepContext* context, bool useBias )
 	B2_ASSERT( b2IsValidVec2( vB ) );
 	B2_ASSERT( b2IsValidFloat( wB ) );
 
-	B2_ASSERT( b2IsValidVec2( vA ) );
-	B2_ASSERT( b2IsValidFloat( wA ) );
-	B2_ASSERT( b2IsValidVec2( vB ) );
-	B2_ASSERT( b2IsValidFloat( wB ) );
-
 	if ( stateA->flags & b2_dynamicFlag )
 	{
 		stateA->linearVelocity = vA;

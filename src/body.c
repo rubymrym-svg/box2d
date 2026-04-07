@@ -208,6 +208,9 @@ b2BodyId b2CreateBody( b2WorldId worldId, const b2BodyDef* def )
 	}
 
 	b2Body* body = b2BodyArray_Get( &world->bodies, bodyId );
+	uint16_t generation = body->generation;
+	memset( body, 0, sizeof( b2Body ) );
+	body->generation = generation;
 
 	uint32_t lockFlags = 0;
 	lockFlags |= def->motionLocks.linearX ? b2_lockLinearX : 0;
@@ -267,21 +270,14 @@ b2BodyId b2CreateBody( b2WorldId worldId, const b2BodyDef* def )
 	body->localIndex = set->bodyIds.count - 1;
 	body->generation += 1;
 	body->headShapeId = B2_NULL_INDEX;
-	body->shapeCount = 0;
 	body->headChainId = B2_NULL_INDEX;
 	body->headContactKey = B2_NULL_INDEX;
-	body->contactCount = 0;
 	body->headJointKey = B2_NULL_INDEX;
-	body->jointCount = 0;
 	body->islandId = B2_NULL_INDEX;
 	body->islandIndex = B2_NULL_INDEX;
 	body->bodyMoveIndex = B2_NULL_INDEX;
-	body->mass = 0.0f;
-	body->inertia = 0.0f;
 	body->sleepThreshold = def->sleepThreshold;
-	body->sleepTime = 0.0f;
 	body->minExtent = B2_HUGE;
-	body->maxExtent = 0.0f;
 	body->type = def->type;
 	body->enableSleep = def->enableSleep;
 	body->stateIndex = B2_NULL_INDEX;

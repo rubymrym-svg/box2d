@@ -261,6 +261,8 @@ b2BodyId b2CreateBody( b2WorldId worldId, const b2BodyDef* def )
 	body->linearDamping = def->linearDamping;
 	body->angularDamping = def->angularDamping;
 	body->gravityScale = def->gravityScale;
+	body->linearVelocity = def->linearVelocity;
+	body->angularVelocity = def->angularVelocity;
 	body->flags = lockFlags;
 	body->flags |= def->isBullet ? b2_isBullet : 0;
 	body->flags |= def->allowFastRotation ? b2_allowFastRotation : 0;

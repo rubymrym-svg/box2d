@@ -1553,7 +1553,7 @@ void b2Solve( b2World* world, b2StepContext* stepContext )
 	{
 		// Prepare buffers for bullets
 		b2AtomicStoreInt( &stepContext->bulletBodyCount, 0 );
-		stepContext->bulletBodies = b2AllocateArenaItem( &world->arena, awakeBodyCount * sizeof( int ), "bullet bodies" );
+		stepContext->bulletBodies = b2AllocateArenaItem( &world->arena, awakeBodyCount * sizeof( b2Body* ), "bullet bodies" );
 
 		b2TracyCZoneNC( prepare_stages, "Prepare Stages", b2_colorDarkOrange, true );
 		uint64_t prepareTicks = b2GetTicks();

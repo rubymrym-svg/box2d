@@ -338,18 +338,8 @@ void b2CreateContact( b2World* world, b2Shape* shapeA, b2Shape* shapeB )
 	// they will link islands and be moved into the constraint graph.
 	b2ContactSim* contactSim = b2ContactSimArray_Add( &set->contactSims );
 	contactSim->contactId = contactId;
-
-#if B2_ENABLE_VALIDATION
 	contactSim->bodyIdA = shapeA->bodyId;
 	contactSim->bodyIdB = shapeB->bodyId;
-#endif
-
-	contactSim->bodySimIndexA = B2_NULL_INDEX;
-	contactSim->bodySimIndexB = B2_NULL_INDEX;
-	contactSim->invMassA = 0.0f;
-	contactSim->invIA = 0.0f;
-	contactSim->invMassB = 0.0f;
-	contactSim->invIB = 0.0f;
 	contactSim->shapeIdA = shapeIdA;
 	contactSim->shapeIdB = shapeIdB;
 	contactSim->cache = b2_emptySimplexCache;

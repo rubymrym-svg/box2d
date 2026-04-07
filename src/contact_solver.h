@@ -42,5 +42,5 @@ void b2PrepareContactConstraints( b2StepContext* context, b2ContactSim** contact
 void b2WarmStartContactConstraints( b2StepContext* context, b2ContactConstraint* constraints, int count );
 void b2SolveContactConstraints( b2StepContext* context, b2ContactConstraint* constraints, int count, float inv_h,
 								float contactSpeed, bool useBias );
-void b2ApplyContactRestitution( b2ContactConstraint* constraints, int count, b2BodyState* states, float threshold );
+void b2ApplyContactRestitution( b2StepContext* context, b2ContactConstraint* constraints, int count, float threshold );
 void b2StoreContactImpulses( b2ContactSim** contacts, b2ContactConstraint* constraints, int count );

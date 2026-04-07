@@ -285,7 +285,6 @@ b2BodyId b2CreateBody( b2WorldId worldId, const b2BodyDef* def )
 	body->type = def->type;
 	body->enableSleep = def->enableSleep;
 	body->clusterIndex = B2_NULL_INDEX;
-	body->localClusterIndex = B2_NULL_INDEX;
 
 	// dynamic and kinematic bodies that are enabled need a island
 	if ( setId >= b2_awakeSet )

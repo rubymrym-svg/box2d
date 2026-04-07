@@ -197,6 +197,8 @@ typedef struct b2BodyState
 	// Important flags: locking, dynamic
 	uint32_t flags; // 4
 
+	int bodyId;
+
 	// Using delta position reduces round-off error far from the origin
 	b2Vec2 deltaPosition; // 8
 
@@ -206,7 +208,7 @@ typedef struct b2BodyState
 } b2BodyState;
 
 // Identity body state, notice the deltaRotation is {1, 0}
-static const b2BodyState b2_identityBodyState = { { 0.0f, 0.0f }, 0.0f, { 0.0f, 0.0f }, 0.0f, 0.0f, 0.0f, 0, { 0.0f, 0.0f }, { 1.0f, 0.0f } };
+static const b2BodyState b2_identityBodyState = { { 0.0f, 0.0f }, 0.0f, { 0.0f, 0.0f }, 0.0f, 0.0f, 0.0f, 0, B2_NULL_INDEX, { 0.0f, 0.0f }, { 1.0f, 0.0f } };
 
 #if 0
 // Body simulation data used for integration of position and velocity

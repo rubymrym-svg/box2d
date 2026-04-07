@@ -195,7 +195,8 @@ void b2ComputeClusters( b2World* world, b2StepContext* context )
 
 		for ( int j = 0; j < clusterBodyCount; ++j )
 		{
-			b2Body* body = b2BodyArray_Get( &world->bodies, clusters[i].bodyIds.data[j] );
+			int bodyId = clusters[i].bodyIds.data[j];
+			b2Body* body = b2BodyArray_Get( &world->bodies, bodyId );
 			body->stateIndex = stateIndex;
 
 			b2BodyState* state = context->states + stateIndex;
@@ -203,7 +204,10 @@ void b2ComputeClusters( b2World* world, b2StepContext* context )
 			state->angularVelocity = body->angularVelocity;
 			state->force = b2MulAdd( body->force, body->gravityScale * body->mass, g );
 			state->torque = body->torque;
+			state->invMass = body->invMass;
+			state->invInertia = body->invInertia;
 			state->flags = body->flags;
+			state->bodyId = bodyId;
 			state->deltaPosition = b2Vec2_zero;
 			state->deltaRotation = b2Rot_identity;
 

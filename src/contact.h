@@ -110,12 +110,6 @@ typedef struct b2ContactSim
 	int shapeIdA;
 	int shapeIdB;
 
-	float invMassA;
-	float invIA;
-
-	float invMassB;
-	float invIB;
-
 	b2Manifold manifold;
 
 	// Mixed friction and restitution

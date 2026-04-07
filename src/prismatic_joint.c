@@ -181,27 +181,23 @@ float b2PrismaticJoint_GetSpeed( b2JointId jointId )
 
 	b2Body* bodyA = b2BodyArray_Get( &world->bodies, base->bodyIdA );
 	b2Body* bodyB = b2BodyArray_Get( &world->bodies, base->bodyIdB );
-	b2BodySim* bodySimA = b2GetBodySim( world, bodyA );
-	b2BodySim* bodySimB = b2GetBodySim( world, bodyB );
-	b2BodyState* bodyStateA = b2GetBodyState( world, bodyA );
-	b2BodyState* bodyStateB = b2GetBodyState( world, bodyB );
 
-	b2Transform transformA = bodySimA->transform;
-	b2Transform transformB = bodySimB->transform;
+	b2Transform transformA = bodyA->transform;
+	b2Transform transformB = bodyB->transform;
 
 	b2Vec2 localAxisA = b2RotateVector( base->localFrameA.q, (b2Vec2){ 1.0f, 0.0f } );
 	b2Vec2 axisA = b2RotateVector( transformA.q, localAxisA );
-	b2Vec2 cA = bodySimA->center;
-	b2Vec2 cB = bodySimB->center;
-	b2Vec2 rA = b2RotateVector( transformA.q, b2Sub( base->localFrameA.p, bodySimA->localCenter ) );
-	b2Vec2 rB = b2RotateVector( transformB.q, b2Sub( base->localFrameB.p, bodySimB->localCenter ) );
+	b2Vec2 cA = bodyA->center;
+	b2Vec2 cB = bodyB->center;
+	b2Vec2 rA = b2RotateVector( transformA.q, b2Sub( base->localFrameA.p, bodyA->localCenter ) );
+	b2Vec2 rB = b2RotateVector( transformB.q, b2Sub( base->localFrameB.p, bodyB->localCenter ) );
 
 	b2Vec2 d = b2Add( b2Sub( cB, cA ), b2Sub( rB, rA ) );
 
-	b2Vec2 vA = bodyStateA ? bodyStateA->linearVelocity : b2Vec2_zero;
-	b2Vec2 vB = bodyStateB ? bodyStateB->linearVelocity : b2Vec2_zero;
-	float wA = bodyStateA ? bodyStateA->angularVelocity : 0.0f;
-	float wB = bodyStateB ? bodyStateB->angularVelocity : 0.0f;
+	b2Vec2 vA = bodyA->linearVelocity;
+	b2Vec2 vB = bodyB->linearVelocity;
+	float wA = bodyA->angularVelocity;
+	float wB = bodyB->angularVelocity;
 
 	b2Vec2 vRel = b2Sub( b2Add( vB, b2CrossSV( wB, rB ) ), b2Add( vA, b2CrossSV( wA, rA ) ) );
 	float speed = b2Dot( d, b2CrossSV( wA, axisA ) ) + b2Dot( axisA, vRel );
@@ -290,38 +286,19 @@ void b2PreparePrismaticJoint( b2JointSim* base, b2StepContext* context )
 	b2Body* bodyA = b2BodyArray_Get( &world->bodies, idA );
 	b2Body* bodyB = b2BodyArray_Get( &world->bodies, idB );
 
-	B2_ASSERT( bodyA->setIndex == b2_awakeSet || bodyB->setIndex == b2_awakeSet );
-	b2SolverSet* setA = b2SolverSetArray_Get( &world->solverSets, bodyA->setIndex );
-	b2SolverSet* setB = b2SolverSetArray_Get( &world->solverSets, bodyB->setIndex );
-
-	int localIndexA = bodyA->localIndex;
-	int localIndexB = bodyB->localIndex;
-
-	b2BodySim* bodySimA = b2BodySimArray_Get( &setA->bodySims, localIndexA );
-	b2BodySim* bodySimB = b2BodySimArray_Get( &setB->bodySims, localIndexB );
-
-	float mA = bodySimA->invMass;
-	float iA = bodySimA->invInertia;
-	float mB = bodySimB->invMass;
-	float iB = bodySimB->invInertia;
-
-	base->invMassA = mA;
-	base->invMassB = mB;
-	base->invIA = iA;
-	base->invIB = iB;
+	base->stateIndexA = bodyA->stateIndex;
+	base->stateIndexB = bodyB->stateIndex;
 
 	b2PrismaticJoint* joint = &base->prismaticJoint;
-	joint->indexA = bodyA->setIndex == b2_awakeSet ? localIndexA : B2_NULL_INDEX;
-	joint->indexB = bodyB->setIndex == b2_awakeSet ? localIndexB : B2_NULL_INDEX;
 
 	// Compute joint anchor frames with world space rotation, relative to center of mass
-	joint->frameA.q = b2MulRot( bodySimA->transform.q, base->localFrameA.q );
-	joint->frameA.p = b2RotateVector( bodySimA->transform.q, b2Sub( base->localFrameA.p, bodySimA->localCenter ) );
-	joint->frameB.q = b2MulRot( bodySimB->transform.q, base->localFrameB.q );
-	joint->frameB.p = b2RotateVector( bodySimB->transform.q, b2Sub( base->localFrameB.p, bodySimB->localCenter ) );
+	joint->frameA.q = b2MulRot( bodyA->transform.q, base->localFrameA.q );
+	joint->frameA.p = b2RotateVector( bodyA->transform.q, b2Sub( base->localFrameA.p, bodyA->localCenter ) );
+	joint->frameB.q = b2MulRot( bodyB->transform.q, base->localFrameB.q );
+	joint->frameB.p = b2RotateVector( bodyB->transform.q, b2Sub( base->localFrameB.p, bodyB->localCenter ) );
 
 	// Compute the initial center delta. Incremental position updates are relative to this.
-	joint->deltaCenter = b2Sub( bodySimB->center, bodySimA->center );
+	joint->deltaCenter = b2Sub( bodyB->center, bodyA->center );
 
 	joint->springSoftness = b2MakeSoft( joint->hertz, joint->dampingRatio, context->h );
 
@@ -339,18 +316,18 @@ void b2WarmStartPrismaticJoint( b2JointSim* base, b2StepContext* context )
 {
 	B2_ASSERT( base->type == b2_prismaticJoint );
 
-	float mA = base->invMassA;
-	float mB = base->invMassB;
-	float iA = base->invIA;
-	float iB = base->invIB;
-
 	// dummy state for static bodies
 	b2BodyState dummyState = b2_identityBodyState;
 
 	b2PrismaticJoint* joint = &base->prismaticJoint;
 
-	b2BodyState* stateA = joint->indexA == B2_NULL_INDEX ? &dummyState : context->states + joint->indexA;
-	b2BodyState* stateB = joint->indexB == B2_NULL_INDEX ? &dummyState : context->states + joint->indexB;
+	b2BodyState* stateA = base->stateIndexA == B2_NULL_INDEX ? &dummyState : context->states + base->stateIndexA;
+	b2BodyState* stateB = base->stateIndexB == B2_NULL_INDEX ? &dummyState : context->states + base->stateIndexB;
+
+	float mA = stateA->invMass;
+	float iA = stateA->invInertia;
+	float mB = stateB->invMass;
+	float iB = stateB->invInertia;
 
 	b2Vec2 rA = b2RotateVector( stateA->deltaRotation, joint->frameA.p );
 	b2Vec2 rB = b2RotateVector( stateB->deltaRotation, joint->frameB.p );
@@ -393,18 +370,18 @@ void b2SolvePrismaticJoint( b2JointSim* base, b2StepContext* context, bool useBi
 {
 	B2_ASSERT( base->type == b2_prismaticJoint );
 
-	float mA = base->invMassA;
-	float mB = base->invMassB;
-	float iA = base->invIA;
-	float iB = base->invIB;
-
 	// dummy state for static bodies
 	b2BodyState dummyState = b2_identityBodyState;
 
 	b2PrismaticJoint* joint = &base->prismaticJoint;
 
-	b2BodyState* stateA = joint->indexA == B2_NULL_INDEX ? &dummyState : context->states + joint->indexA;
-	b2BodyState* stateB = joint->indexB == B2_NULL_INDEX ? &dummyState : context->states + joint->indexB;
+	b2BodyState* stateA = base->stateIndexA == B2_NULL_INDEX ? &dummyState : context->states + base->stateIndexA;
+	b2BodyState* stateB = base->stateIndexB == B2_NULL_INDEX ? &dummyState : context->states + base->stateIndexB;
+
+	float mA = stateA->invMass;
+	float iA = stateA->invInertia;
+	float mB = stateB->invMass;
+	float iB = stateB->invInertia;
 
 	b2Vec2 vA = stateA->linearVelocity;
 	float wA = stateA->angularVelocity;

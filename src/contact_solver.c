@@ -15,7 +15,6 @@ void b2PrepareContactConstraints( b2StepContext* context, b2ContactSim** contact
 	b2World* world = context->world;
 	b2Body* bodies = world->bodies.data;
 	float warmStartScale = world->enableWarmStarting ? 1.0f : 0.0f;
-	b2BodyState* states = context->states;
 
 	for ( int i = 0; i < count; ++i )
 	{
@@ -40,27 +39,15 @@ void b2PrepareContactConstraints( b2StepContext* context, b2ContactSim** contact
 		constraint->tangentSpeed = contactSim->tangentSpeed;
 		constraint->pointCount = pointCount;
 
-		b2Vec2 vA = b2Vec2_zero;
-		float wA = 0.0f;
-		float mA = contactSim->invMassA;
-		float iA = contactSim->invIA;
-		if ( indexA != B2_NULL_INDEX )
-		{
-			b2BodyState* stateA = states + indexA;
-			vA = stateA->linearVelocity;
-			wA = stateA->angularVelocity;
-		}
+		b2Vec2 vA = bodyA->linearVelocity;
+		float wA = bodyA->angularVelocity;
+		float mA = bodyA->invMass;
+		float iA = bodyA->invInertia;
 
-		b2Vec2 vB = b2Vec2_zero;
-		float wB = 0.0f;
-		float mB = contactSim->invMassB;
-		float iB = contactSim->invIB;
-		if ( indexB != B2_NULL_INDEX )
-		{
-			b2BodyState* stateB = states + indexB;
-			vB = stateB->linearVelocity;
-			wB = stateB->angularVelocity;
-		}
+		b2Vec2 vB = bodyB->linearVelocity;
+		float wB = bodyB->angularVelocity;
+		float mB = bodyB->invMass;
+		float iB = bodyB->invInertia;
 
 		constraint->invMassA = mA;
 		constraint->invIA = iA;
@@ -303,8 +290,9 @@ void b2SolveContactConstraints( b2StepContext* context, b2ContactConstraint* con
 	}
 }
 
-void b2ApplyContactRestitution( b2ContactConstraint* constraints, int count, b2BodyState* states, float threshold )
+void b2ApplyContactRestitution(b2StepContext* context, b2ContactConstraint* constraints, int count, float threshold )
 {
+	b2BodyState* states = context->states; 
 	b2BodyState dummyState = b2_identityBodyState;
 
 	for ( int i = 0; i < count; ++i )
@@ -399,6 +387,7 @@ void b2StoreContactImpulses( b2ContactSim** contacts, b2ContactConstraint* const
 	}
 }
 
+#if 0
 #if defined( B2_SIMD_AVX2 )
 
 #include <immintrin.h>
@@ -1415,5 +1404,7 @@ static void b2ScatterBodies( b2BodyState* B2_RESTRICT states, int* B2_RESTRICT i
 		state->angularVelocity = simdBody->w.w;
 	}
 }
+
+#endif
 
 #endif

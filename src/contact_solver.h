@@ -27,8 +27,6 @@ typedef struct b2ContactConstraint
 	int indexB;
 	b2ContactConstraintPoint points[2];
 	b2Vec2 normal;
-	float invMassA, invMassB;
-	float invIA, invIB;
 	float friction;
 	float restitution;
 	float tangentSpeed;

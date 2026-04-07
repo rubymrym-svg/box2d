@@ -141,9 +141,6 @@ typedef struct b2Body
 	// State index in b2StepContext
 	int stateIndex;
 
-	//// Index of this body within its cluster's local body state array
-	//int localClusterIndex;
-
 	int16_t clusterIndex;
 	
 	// This is monotonically advanced when a body is allocated in this slot

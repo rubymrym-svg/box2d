@@ -594,28 +594,30 @@ static void b2FinalizeBodiesTask( int startIndex, int endIndex, uint32_t threadI
 	for ( int stateIndex = startIndex; stateIndex < endIndex; ++stateIndex )
 	{
 		b2BodyState* state = states + stateIndex;
+		b2Vec2 v = state->linearVelocity;
+		float w = state->angularVelocity;
 
 		if ( state->flags & b2_lockLinearX )
 		{
-			state->linearVelocity.x = 0.0f;
+			v.x = 0.0f;
 		}
 
 		if ( state->flags & b2_lockLinearY )
 		{
-			state->linearVelocity.y = 0.0f;
+			v.y = 0.0f;
 		}
 
 		if ( state->flags & b2_lockAngularZ )
 		{
-			state->angularVelocity = 0.0f;
+			w = 0.0f;
 		}
-
-		b2Vec2 v = state->linearVelocity;
-		float w = state->angularVelocity;
 
 		B2_VALIDATE( 0 <= state->bodyId && state->bodyId < world->bodies.count );
 		b2Body* body = bodies + state->bodyId;
 		body->bodyMoveIndex = stateIndex;
+
+		// Reset state index for safety
+		body->stateIndex = B2_NULL_INDEX;
 
 		if ( b2IsValidVec2( v ) == false )
 		{
@@ -640,10 +642,6 @@ static void b2FinalizeBodiesTask( int startIndex, int endIndex, uint32_t threadI
 		float positionSleepFactor = 0.5f;
 
 		float sleepVelocity = b2MaxFloat( maxVelocity, positionSleepFactor * invTimeStep * maxDeltaPosition );
-
-		// reset state deltas
-		state->deltaPosition = b2Vec2_zero;
-		state->deltaRotation = b2Rot_identity;
 
 		body->transform.p = b2Sub( body->center, b2RotateVector( body->transform.q, body->localCenter ) );
 

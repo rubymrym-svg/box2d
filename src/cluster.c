@@ -22,7 +22,7 @@ void b2CreateClusters( b2ClusterManager* manager )
 	for ( int i = 0; i < B2_CLUSTER_COUNT; ++i )
 	{
 		b2Cluster* cluster = manager->clusters + i;
-		b2Array_CreateN(cluster->bodyIds, 16 );
+		b2Array_CreateN( cluster->bodyIds, 16 );
 	}
 }
 
@@ -64,11 +64,6 @@ void b2ComputeClusters( b2World* world, b2StepContext* context )
 			clusters[i].center = body->center;
 			b2Array_Push( clusters[i].bodyIds, bodyIds[i] );
 			body->clusterIndex = (int16_t)i;
-		}
-
-		if ( awakeCount < B2_CLUSTER_COUNT )
-		{
-			return;
 		}
 
 		for ( int iteration = 0; iteration < 32; ++iteration )
@@ -263,7 +258,7 @@ void b2ClassifyConstraints( b2World* world, b2StepContext* context )
 				int clusterIdx = bodyB->clusterIndex;
 				clusterContactCounts[clusterIdx] += 1;
 			}
-			else if (typeB == b2_staticBody)
+			else if ( typeB == b2_staticBody )
 			{
 				int clusterIdx = bodyA->clusterIndex;
 				clusterContactCounts[clusterIdx] += 1;
@@ -345,19 +340,15 @@ void b2ClassifyConstraints( b2World* world, b2StepContext* context )
 		int cc = clusterContactCounts[i];
 		int jc = clusterJointCounts[i];
 
-		cd->contacts = ( cc > 0 )
-			? b2AllocateArenaItem( &world->arena, cc * sizeof( b2ContactSim* ), "cluster contacts" )
-			: NULL;
+		cd->contacts = ( cc > 0 ) ? b2AllocateArenaItem( &world->arena, cc * sizeof( b2ContactSim* ), "cluster contacts" ) : NULL;
 		cd->contactCount = 0;
 
-		cd->joints = ( jc > 0 )
-			? b2AllocateArenaItem( &world->arena, jc * sizeof( b2JointSim* ), "cluster joints" )
-			: NULL;
+		cd->joints = ( jc > 0 ) ? b2AllocateArenaItem( &world->arena, jc * sizeof( b2JointSim* ), "cluster joints" ) : NULL;
 		cd->jointCount = 0;
 
-		cd->contactConstraints = ( cc > 0 )
-			? b2AllocateArenaItem( &world->arena, cc * sizeof( b2ContactConstraint ), "cluster contact constraints" )
-			: NULL;
+		cd->contactConstraints =
+			( cc > 0 ) ? b2AllocateArenaItem( &world->arena, cc * sizeof( b2ContactConstraint ), "cluster contact constraints" )
+					   : NULL;
 
 		// Allocate per-cluster local body state array for L1 cache locality
 		int bodyCount = cluster->bodyIds.count;
@@ -367,12 +358,12 @@ void b2ClassifyConstraints( b2World* world, b2StepContext* context )
 		stateIndex += bodyCount;
 
 		//// Build reverse mapping: body id -> local cluster index
-		//for ( int k = 0; k < bodyCount; ++k )
+		// for ( int k = 0; k < bodyCount; ++k )
 		//{
 		//	int bodyId = cluster->bodyIds.data[k];
 		//	b2Body* body = b2BodyArray_Get( &world->bodies, bodyId );
 		//	body->localClusterIndex = k;
-		//}
+		// }
 
 		b2AtomicStoreInt( &cd->solveComplete, 0 );
 	}
@@ -390,9 +381,9 @@ void b2ClassifyConstraints( b2World* world, b2StepContext* context )
 	}
 
 	context->borderCount = borderCount;
-	context->borders = ( borderCount > 0 )
-		? b2AllocateArenaItem( &world->arena, borderCount * sizeof( b2BorderConstraints ), "border constraints" )
-		: NULL;
+	context->borders = ( borderCount > 0 ) ? b2AllocateArenaItem( &world->arena, borderCount * sizeof( b2BorderConstraints ),
+																  "border constraints" )
+										   : NULL;
 
 	// Fill in border data
 	int borderWriteIndex = 0;
@@ -413,19 +404,17 @@ void b2ClassifyConstraints( b2World* world, b2StepContext* context )
 			border->clusterA = a;
 			border->clusterB = b;
 
-			border->contacts = ( cc > 0 )
-				? b2AllocateArenaItem( &world->arena, cc * sizeof( b2ContactSim* ), "border contacts" )
-				: NULL;
+			border->contacts =
+				( cc > 0 ) ? b2AllocateArenaItem( &world->arena, cc * sizeof( b2ContactSim* ), "border contacts" ) : NULL;
 			border->contactCount = 0;
 
-			border->joints = ( jc > 0 )
-				? b2AllocateArenaItem( &world->arena, jc * sizeof( b2JointSim* ), "border joints" )
-				: NULL;
+			border->joints =
+				( jc > 0 ) ? b2AllocateArenaItem( &world->arena, jc * sizeof( b2JointSim* ), "border joints" ) : NULL;
 			border->jointCount = 0;
 
-			border->contactConstraints = ( cc > 0 )
-				? b2AllocateArenaItem( &world->arena, cc * sizeof( b2ContactConstraint ), "border contact constraints" )
-				: NULL;
+			border->contactConstraints = ( cc > 0 ) ? b2AllocateArenaItem( &world->arena, cc * sizeof( b2ContactConstraint ),
+																		   "border contact constraints" )
+													: NULL;
 
 			// Store the border write index in the flat array for the second pass
 			// Reuse borderContactCounts as a mapping from flat index -> border write index

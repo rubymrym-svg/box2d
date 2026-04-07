@@ -23,7 +23,7 @@ void b2PrepareContactConstraints( b2StepContext* context, b2ContactSim** contact
 		b2Body* bodyB = bodies + contactSim->bodyIdB;
 		int indexA = bodyA->stateIndex;
 		int indexB = bodyB->stateIndex;
-		 
+
 		const b2Manifold* manifold = &contactSim->manifold;
 		int pointCount = manifold->pointCount;
 		B2_ASSERT( 0 < pointCount && pointCount <= 2 );
@@ -48,11 +48,6 @@ void b2PrepareContactConstraints( b2StepContext* context, b2ContactSim** contact
 		float wB = bodyB->angularVelocity;
 		float mB = bodyB->invMass;
 		float iB = bodyB->invInertia;
-
-		constraint->invMassA = mA;
-		constraint->invIA = iA;
-		constraint->invMassB = mB;
-		constraint->invIB = iB;
 
 		{
 			float k = iA + iB;
@@ -103,21 +98,21 @@ void b2WarmStartContactConstraints( b2StepContext* context, b2ContactConstraint*
 	{
 		b2ContactConstraint* constraint = constraints + i;
 
-		int indexA = constraint->indexA - 1;
-		int indexB = constraint->indexB - 1;
+		int indexA = constraint->indexA;
+		int indexB = constraint->indexB;
 
 		b2BodyState* stateA = indexA == B2_NULL_INDEX ? &dummyState : states + indexA;
 		b2BodyState* stateB = indexB == B2_NULL_INDEX ? &dummyState : states + indexB;
 
 		b2Vec2 vA = stateA->linearVelocity;
 		float wA = stateA->angularVelocity;
+		float mA = stateA->invMass;
+		float iA = stateA->invInertia;
+
 		b2Vec2 vB = stateB->linearVelocity;
 		float wB = stateB->angularVelocity;
-
-		float mA = constraint->invMassA;
-		float iA = constraint->invIA;
-		float mB = constraint->invMassB;
-		float iB = constraint->invIB;
+		float mB = stateB->invMass;
+		float iB = stateB->invInertia;
 
 		b2Vec2 normal = constraint->normal;
 		b2Vec2 tangent = b2RightPerp( normal );
@@ -155,8 +150,8 @@ void b2WarmStartContactConstraints( b2StepContext* context, b2ContactConstraint*
 	}
 }
 
-void b2SolveContactConstraints( b2StepContext* context, b2ContactConstraint* constraints, int count, float inv_h, float contactSpeed,
-									   bool useBias )
+void b2SolveContactConstraints( b2StepContext* context, b2ContactConstraint* constraints, int count, float inv_h,
+								float contactSpeed, bool useBias )
 {
 	b2BodyState dummyState = b2_identityBodyState;
 
@@ -168,22 +163,21 @@ void b2SolveContactConstraints( b2StepContext* context, b2ContactConstraint* con
 	{
 		b2ContactConstraint* constraint = constraints + i;
 
-		float mA = constraint->invMassA;
-		float iA = constraint->invIA;
-		float mB = constraint->invMassB;
-		float iB = constraint->invIB;
-
-		int indexA = constraint->indexA - 1;
-		int indexB = constraint->indexB - 1;
+		int indexA = constraint->indexA;
+		int indexB = constraint->indexB;
 
 		b2BodyState* stateA = indexA == B2_NULL_INDEX ? &dummyState : states + indexA;
 		b2Vec2 vA = stateA->linearVelocity;
 		float wA = stateA->angularVelocity;
+		float mA = stateA->invMass;
+		float iA = stateA->invInertia;
 		b2Rot dqA = stateA->deltaRotation;
 
 		b2BodyState* stateB = indexB == B2_NULL_INDEX ? &dummyState : states + indexB;
 		b2Vec2 vB = stateB->linearVelocity;
 		float wB = stateB->angularVelocity;
+		float mB = stateB->invMass;
+		float iB = stateB->invInertia;
 		b2Rot dqB = stateB->deltaRotation;
 
 		b2Vec2 dp = b2Sub( stateB->deltaPosition, stateA->deltaPosition );
@@ -290,9 +284,9 @@ void b2SolveContactConstraints( b2StepContext* context, b2ContactConstraint* con
 	}
 }
 
-void b2ApplyContactRestitution(b2StepContext* context, b2ContactConstraint* constraints, int count, float threshold )
+void b2ApplyContactRestitution( b2StepContext* context, b2ContactConstraint* constraints, int count, float threshold )
 {
-	b2BodyState* states = context->states; 
+	b2BodyState* states = context->states;
 	b2BodyState dummyState = b2_identityBodyState;
 
 	for ( int i = 0; i < count; ++i )
@@ -304,21 +298,20 @@ void b2ApplyContactRestitution(b2StepContext* context, b2ContactConstraint* cons
 			continue;
 		}
 
-		float mA = constraint->invMassA;
-		float iA = constraint->invIA;
-		float mB = constraint->invMassB;
-		float iB = constraint->invIB;
-
-		int indexA = constraint->indexA - 1;
-		int indexB = constraint->indexB - 1;
+		int indexA = constraint->indexA;
+		int indexB = constraint->indexB;
 
 		b2BodyState* stateA = indexA == B2_NULL_INDEX ? &dummyState : states + indexA;
 		b2Vec2 vA = stateA->linearVelocity;
 		float wA = stateA->angularVelocity;
+		float mA = stateA->invMass;
+		float iA = stateA->invInertia;
 
 		b2BodyState* stateB = indexB == B2_NULL_INDEX ? &dummyState : states + indexB;
 		b2Vec2 vB = stateB->linearVelocity;
 		float wB = stateB->angularVelocity;
+		float mB = stateB->invMass;
+		float iB = stateB->invInertia;
 
 		b2Vec2 normal = constraint->normal;
 		int pointCount = constraint->pointCount;

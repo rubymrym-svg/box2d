@@ -793,7 +793,11 @@ void b2World_Step( b2WorldId worldId, float timeStep, int subStepCount )
 		world->profile.solve = b2GetMilliseconds( solveTicks );
 	}
 
-	b2FreeArenaItem( &world->arena, context.states );
+	if ( context.states != NULL )
+	{
+		b2FreeArenaItem( &world->arena, context.states );
+		context.states = NULL;
+	}
 
 	// Update sensors
 	{

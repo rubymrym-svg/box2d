@@ -33,20 +33,20 @@ typedef struct b2Cluster
 typedef struct b2ClusterSolveData
 {
 	b2ContactSim** contacts;
+	b2ContactConstraint* contactConstraints;
 	int contactCount;
 
 	b2JointSim** joints;
 	int jointCount;
-
-	b2ContactConstraint* contactConstraints;
-
-	int bodyCount;
 
 	// Pointer to cluster's body ids
 	int* bodyIds;
 
 	// Pointer to sub-array in b2StepContext::states
 	b2BodyState* states;
+	int bodyCount;
+
+	char dummy1[64];
 
 	// Signaled by the worker when this cluster's solve phase is done
 	b2AtomicInt solveComplete;

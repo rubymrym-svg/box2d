@@ -508,13 +508,10 @@ typedef struct b2Profile
 	float prepareStages;
 	float solveConstraints;
 	float prepareConstraints;
-	float integrateVelocities;
 	float warmStart;
 	float solveImpulses;
-	float integratePositions;
 	float relaxImpulses;
 	float applyRestitution;
-	float storeImpulses;
 	float splitIslands;
 	float transforms;
 	float sensorHits;

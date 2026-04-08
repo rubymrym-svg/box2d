@@ -357,14 +357,6 @@ void b2ClassifyConstraints( b2World* world, b2StepContext* context )
 		cd->states = context->states + stateIndex;
 		stateIndex += bodyCount;
 
-		//// Build reverse mapping: body id -> local cluster index
-		// for ( int k = 0; k < bodyCount; ++k )
-		//{
-		//	int bodyId = cluster->bodyIds.data[k];
-		//	b2Body* body = b2BodyArray_Get( &world->bodies, bodyId );
-		//	body->localClusterIndex = k;
-		// }
-
 		b2AtomicStoreInt( &cd->solveComplete, 0 );
 	}
 

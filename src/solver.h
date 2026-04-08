@@ -25,11 +25,6 @@ typedef struct b2Softness
 
 typedef enum b2SolverStageType
 {
-	b2_stagePrepareJoints,
-	b2_stageIntegrateVelocities,
-	b2_stageIntegratePositions,
-
-	// Cluster solver stages
 	b2_stageSolveClusters,
 	b2_stageRelaxClusters,
 	b2_stageRestitutionClusters,
@@ -37,36 +32,13 @@ typedef enum b2SolverStageType
 	b2_stageWarmStartClusters,
 } b2SolverStageType;
 
-typedef enum b2SolverBlockType
-{
-	b2_bodyBlock,
-	b2_jointBlock,
-	b2_contactBlock
-} b2SolverBlockType;
-
-// Each block of work has a sync index that gets incremented when a worker claims the block. This ensures only a single worker
-// claims a block, yet lets work be distributed dynamically across multiple workers (work stealing). This also reduces contention
-// on a single block index atomic. For non-iterative stages the sync index is simply set to one. For iterative stages (solver
-// iteration) the same block of work is executed once per iteration and the atomic sync index is shared across iterations, so it
-// increases monotonically.
-typedef struct b2SolverBlock
-{
-	int startIndex;
-	// todo make this uint16_t
-	int16_t count;
-	int16_t blockType; // b2SolverBlockType
-	// todo consider false sharing of this atomic
-	b2AtomicInt syncIndex;
-} b2SolverBlock;
-
 // Each stage must be completed before going to the next stage.
 // Non-iterative stages use a stage instance once while iterative stages re-use the same instance each iteration.
 typedef struct b2SolverStage
 {
 	b2SolverStageType type;
-	b2SolverBlock* blocks;
-	int blockCount;
 	bool storeImpulses;
+	bool integratePositions;
 	// todo consider false sharing of this atomic
 	b2AtomicInt completionCount;
 } b2SolverStage;
@@ -103,9 +75,6 @@ typedef struct b2StepContext
 	// Array of bullet bodies that need continuous collision handling
 	b2Body** bulletBodies;
 	b2AtomicInt bulletBodyCount;
-
-	// joint pointers for simplified parallel-for access.
-	b2JointSim** joints;
 
 	// contact pointers for simplified parallel-for access.
 	// - parallel-for collide with no gaps

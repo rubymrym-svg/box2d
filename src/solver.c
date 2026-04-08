@@ -62,129 +62,6 @@ typedef struct b2WorkerContext
 	void* userTask;
 } b2WorkerContext;
 
-// Integrate velocities and apply damping
-static void b2IntegrateVelocitiesTask( int startIndex, int endIndex, b2StepContext* context )
-{
-	b2TracyCZoneNC( integrate_velocity, "IntVel", b2_colorDeepPink, true );
-
-	b2BodyState* states = context->states;
-
-	float h = context->h;
-	float maxLinearSpeed = context->maxLinearVelocity;
-	float maxAngularSpeed = B2_MAX_ROTATION * context->inv_dt;
-	float maxLinearSpeedSquared = maxLinearSpeed * maxLinearSpeed;
-	float maxAngularSpeedSquared = maxAngularSpeed * maxAngularSpeed;
-
-	for ( int i = startIndex; i < endIndex; ++i )
-	{
-		b2BodyState* state = states + i;
-
-		b2Vec2 v = state->linearVelocity;
-		float w = state->angularVelocity;
-
-		// todo disabling damping to save space
-		// Apply forces, torque, gravity, and damping
-		// Apply damping.
-		// Differential equation: dv/dt + c * v = 0
-		// Solution: v(t) = v0 * exp(-c * t)
-		// Time step: v(t + dt) = v0 * exp(-c * (t + dt)) = v0 * exp(-c * t) * exp(-c * dt) = v(t) * exp(-c * dt)
-		// v2 = exp(-c * dt) * v1
-		// Pade approximation:
-		// v2 = v1 * 1 / (1 + c * dt)
-		// float linearDamping = 1.0f / ( 1.0f + h * sim->linearDamping );
-		// float angularDamping = 1.0f / ( 1.0f + h * sim->angularDamping );
-
-		v = b2MulAdd( v, h * state->invMass, state->force );
-		w += h * state->invInertia * state->torque;
-
-		// Clamp to max linear speed
-		if ( b2Dot( v, v ) > maxLinearSpeedSquared )
-		{
-			float ratio = maxLinearSpeed / b2Length( v );
-			v = b2MulSV( ratio, v );
-			state->flags |= b2_isSpeedCapped;
-		}
-
-		// Clamp to max angular speed
-		if ( w * w > maxAngularSpeedSquared && ( state->flags & b2_allowFastRotation ) == 0 )
-		{
-			float ratio = maxAngularSpeed / b2AbsFloat( w );
-			w *= ratio;
-			state->flags |= b2_isSpeedCapped;
-		}
-
-		if ( state->flags & b2_lockLinearX )
-		{
-			v.x = 0.0f;
-		}
-
-		if ( state->flags & b2_lockLinearY )
-		{
-			v.y = 0.0f;
-		}
-
-		if ( state->flags & b2_lockAngularZ )
-		{
-			w = 0.0f;
-		}
-
-		state->linearVelocity = v;
-		state->angularVelocity = w;
-	}
-
-	b2TracyCZoneEnd( integrate_velocity );
-}
-
-static void b2PrepareJointsTask( int startIndex, int endIndex, b2StepContext* context )
-{
-	b2TracyCZoneNC( prepare_joints, "PrepJoints", b2_colorOldLace, true );
-
-	b2JointSim** joints = context->joints;
-
-	for ( int i = startIndex; i < endIndex; ++i )
-	{
-		b2JointSim* joint = joints[i];
-		b2PrepareJoint( joint, context );
-	}
-
-	b2TracyCZoneEnd( prepare_joints );
-}
-
-static void b2IntegratePositionsTask( int startIndex, int endIndex, b2StepContext* context )
-{
-	b2TracyCZoneNC( integrate_positions, "IntPos", b2_colorDarkSeaGreen, true );
-
-	b2BodyState* states = context->states;
-	float h = context->h;
-
-	B2_ASSERT( startIndex <= endIndex );
-
-	for ( int i = startIndex; i < endIndex; ++i )
-	{
-		b2BodyState* state = states + i;
-
-		if ( state->flags & b2_lockLinearX )
-		{
-			state->linearVelocity.x = 0.0f;
-		}
-
-		if ( state->flags & b2_lockLinearY )
-		{
-			state->linearVelocity.y = 0.0f;
-		}
-
-		if ( state->flags & b2_lockAngularZ )
-		{
-			state->angularVelocity = 0.0f;
-		}
-
-		state->deltaPosition = b2MulAdd( state->deltaPosition, h, state->linearVelocity );
-		state->deltaRotation = b2IntegrateRotation( state->deltaRotation, h * state->angularVelocity );
-	}
-
-	b2TracyCZoneEnd( integrate_positions );
-}
-
 #define B2_MAX_CONTINUOUS_SENSOR_HITS 8
 
 struct b2ContinuousContext
@@ -770,144 +647,10 @@ static void b2FinalizeBodiesTask( int startIndex, int endIndex, uint32_t threadI
 	b2TracyCZoneEnd( finalize_transforms );
 }
 
-static void b2ExecuteBlock( b2SolverStage* stage, b2StepContext* context, b2SolverBlock* block, int workerIndex )
-{
-	b2SolverStageType stageType = stage->type;
-	B2_UNUSED( workerIndex );
-	int startIndex = block->startIndex;
-	int endIndex = startIndex + block->count;
-
-	switch ( stageType )
-	{
-		case b2_stagePrepareJoints:
-			b2PrepareJointsTask( startIndex, endIndex, context );
-			break;
-
-		case b2_stageIntegrateVelocities:
-			b2IntegrateVelocitiesTask( startIndex, endIndex, context );
-			break;
-
-		case b2_stageIntegratePositions:
-			b2IntegratePositionsTask( startIndex, endIndex, context );
-			break;
-
-		case b2_stageSolveClusters:
-		case b2_stageRelaxClusters:
-		case b2_stageRestitutionClusters:
-		case b2_stagePrepareClusters:
-		case b2_stageWarmStartClusters:
-			// Cluster stages are handled directly by b2SolverTask, not through b2ExecuteBlock
-			break;
-	}
-}
-
-static inline int GetWorkerStartIndex( int workerIndex, int blockCount, int workerCount )
-{
-	if ( blockCount <= workerCount )
-	{
-		return workerIndex < blockCount ? workerIndex : B2_NULL_INDEX;
-	}
-
-	int blocksPerWorker = blockCount / workerCount;
-	int remainder = blockCount - blocksPerWorker * workerCount;
-	return blocksPerWorker * workerIndex + b2MinInt( remainder, workerIndex );
-}
-
-static void b2ExecuteStage( b2SolverStage* stage, b2StepContext* context, int previousSyncIndex, int syncIndex, int workerIndex )
-{
-	int completedCount = 0;
-	b2SolverBlock* blocks = stage->blocks;
-	int blockCount = stage->blockCount;
-
-	int expectedSyncIndex = previousSyncIndex;
-
-	int startIndex = GetWorkerStartIndex( workerIndex, blockCount, context->workerCount );
-	if ( startIndex == B2_NULL_INDEX )
-	{
-		return;
-	}
-
-	B2_ASSERT( 0 <= startIndex && startIndex < blockCount );
-
-	int blockIndex = startIndex;
-
-	while ( b2AtomicCompareExchangeInt( &blocks[blockIndex].syncIndex, expectedSyncIndex, syncIndex ) == true )
-	{
-		B2_ASSERT( completedCount < blockCount );
-
-		b2ExecuteBlock( stage, context, blocks + blockIndex, workerIndex );
-
-		completedCount += 1;
-		blockIndex += 1;
-		if ( blockIndex >= blockCount )
-		{
-			// Keep looking for work
-			blockIndex = 0;
-		}
-
-		expectedSyncIndex = previousSyncIndex;
-	}
-
-	// Search backwards for blocks
-	blockIndex = startIndex - 1;
-	while ( true )
-	{
-		if ( blockIndex < 0 )
-		{
-			blockIndex = blockCount - 1;
-		}
-
-		expectedSyncIndex = previousSyncIndex;
-
-		if ( b2AtomicCompareExchangeInt( &blocks[blockIndex].syncIndex, expectedSyncIndex, syncIndex ) == false )
-		{
-			break;
-		}
-
-		b2ExecuteBlock( stage, context, blocks + blockIndex, workerIndex );
-		completedCount += 1;
-		blockIndex -= 1;
-	}
-
-	(void)b2AtomicFetchAddInt( &stage->completionCount, completedCount );
-}
-
-static void b2ExecuteMainStage( b2SolverStage* stage, b2StepContext* context, uint32_t syncBits )
-{
-	int blockCount = stage->blockCount;
-	if ( blockCount == 0 )
-	{
-		return;
-	}
-
-	int workerIndex = 0;
-
-	if ( blockCount == 1 )
-	{
-		b2ExecuteBlock( stage, context, stage->blocks, workerIndex );
-	}
-	else
-	{
-		b2AtomicStoreU32( &context->atomicSyncBits, syncBits );
-
-		int syncIndex = ( syncBits >> 16 ) & 0xFFFF;
-		B2_ASSERT( syncIndex > 0 );
-		int previousSyncIndex = syncIndex - 1;
-
-		b2ExecuteStage( stage, context, previousSyncIndex, syncIndex, workerIndex );
-
-		// todo consider using the cycle counter as well
-		while ( b2AtomicLoadInt( &stage->completionCount ) != blockCount )
-		{
-			b2Pause();
-		}
-
-		b2AtomicStoreInt( &stage->completionCount, 0 );
-	}
-}
-
 // Helper: main thread solves borders whose adjacent clusters are both complete.
-// Returns when all borders are solved.
+// Solve borders in fixed index order, eagerly starting each border as soon as both its
+// adjacent clusters are done. Never skip ahead — this ensures deterministic solve order
+// even when borders share a cluster and modify overlapping body state.
 static void b2SolveBordersWhenReady( b2StepContext* context, bool useBias, bool isRestitution, b2SolverStage* stage )
 {
 	b2TracyCZoneNC( solver_borders, "Solve Borders", b2_colorMintCream, true );
@@ -918,60 +661,45 @@ static void b2SolveBordersWhenReady( b2StepContext* context, bool useBias, bool 
 
 	if ( borderCount == 0 )
 	{
+		b2TracyCZoneEnd( solver_borders );
 		return;
 	}
 
-	int bordersSolved = 0;
-	bool borderDone[B2_MAX_BORDERS];
-	memset( borderDone, 0, (size_t)borderCount * sizeof( bool ) );
-
-	while ( bordersSolved < borderCount )
+	for ( int bi = 0; bi < borderCount; ++bi )
 	{
-		for ( int bi = 0; bi < borderCount; ++bi )
-		{
-			if ( borderDone[bi] )
-			{
-				continue;
-			}
+		b2BorderConstraints* border = borders + bi;
 
-			b2BorderConstraints* border = borders + bi;
-			if ( b2AtomicLoadInt( &clusterData[border->clusterA].solveComplete ) &&
-				 b2AtomicLoadInt( &clusterData[border->clusterB].solveComplete ) )
-			{
-				if ( isRestitution )
-				{
-					if ( border->contactCount > 0 )
-					{
-						b2ApplyContactRestitution( context, border->contactConstraints, border->contactCount,
-												   context->world->restitutionThreshold );
-					}
-				}
-				else
-				{
-					if ( border->contactCount > 0 )
-					{
-						b2SolveContactConstraints( context, border->contactConstraints, border->contactCount, context->inv_h,
-												   context->world->contactSpeed, useBias );
-					}
-					for ( int k = 0; k < border->jointCount; ++k )
-					{
-						b2SolveJoint( border->joints[k], context, useBias );
-					}
-
-					if ( stage->storeImpulses && border->contactCount > 0 )
-					{
-						b2StoreContactImpulses( border->contacts, border->contactConstraints, border->contactCount );
-					}
-				}
-
-				borderDone[bi] = true;
-				bordersSolved += 1;
-			}
-		}
-
-		if ( bordersSolved < borderCount )
+		// Spin-wait until both adjacent clusters have finished solving
+		while ( b2AtomicLoadInt( &clusterData[border->clusterA].solveComplete ) == 0 ||
+				b2AtomicLoadInt( &clusterData[border->clusterB].solveComplete ) == 0 )
 		{
 			b2Pause();
+		}
+
+		if ( isRestitution )
+		{
+			if ( border->contactCount > 0 )
+			{
+				b2ApplyContactRestitution( context, border->contactConstraints, border->contactCount,
+										   context->world->restitutionThreshold );
+			}
+		}
+		else
+		{
+			if ( border->contactCount > 0 )
+			{
+				b2SolveContactConstraints( context, border->contactConstraints, border->contactCount, context->inv_h,
+										   context->world->contactSpeed, useBias );
+			}
+			for ( int k = 0; k < border->jointCount; ++k )
+			{
+				b2SolveJoint( border->joints[k], context, useBias );
+			}
+
+			if ( stage->storeImpulses && border->contactCount > 0 )
+			{
+				b2StoreContactImpulses( border->contacts, border->contactConstraints, border->contactCount );
+			}
 		}
 	}
 
@@ -993,6 +721,33 @@ static void b2SolveWorkerClusters( b2StepContext* context, int workerIndex, bool
 		}
 
 		b2ClusterSolveData* cd = clusterData + c;
+
+		if ( stage->integratePositions )
+		{
+			float h = context->h;
+			for ( int i = 0; i < cd->bodyCount; ++i )
+			{
+				b2BodyState* state = cd->states + i;
+
+				if ( state->flags & b2_lockLinearX )
+				{
+					state->linearVelocity.x = 0.0f;
+				}
+
+				if ( state->flags & b2_lockLinearY )
+				{
+					state->linearVelocity.y = 0.0f;
+				}
+
+				if ( state->flags & b2_lockAngularZ )
+				{
+					state->angularVelocity = 0.0f;
+				}
+
+				state->deltaPosition = b2MulAdd( state->deltaPosition, h, state->linearVelocity );
+				state->deltaRotation = b2IntegrateRotation( state->deltaRotation, h * state->angularVelocity );
+			}
+		}
 
 		if ( isRestitution )
 		{
@@ -1073,42 +828,25 @@ static void b2PrepareBordersWhenReady( b2StepContext* context )
 		return;
 	}
 
-	int bordersPrepared = 0;
-	bool borderDone[B2_MAX_BORDERS];
-	memset( borderDone, 0, (size_t)borderCount * sizeof( bool ) );
-
-	while ( bordersPrepared < borderCount )
+	for ( int bi = 0; bi < borderCount; ++bi )
 	{
-		for ( int bi = 0; bi < borderCount; ++bi )
-		{
-			if ( borderDone[bi] )
-			{
-				continue;
-			}
+		b2BorderConstraints* border = borders + bi;
 
-			b2BorderConstraints* border = borders + bi;
-			if ( b2AtomicLoadInt( &clusterData[border->clusterA].prepareComplete ) &&
-				 b2AtomicLoadInt( &clusterData[border->clusterB].prepareComplete ) )
-			{
-				if ( border->contactCount > 0 )
-				{
-					// Borders use global indices (NULL bodySims)
-					b2PrepareContactConstraints( context, border->contacts, border->contactConstraints, border->contactCount );
-				}
-
-				for ( int j = 0; j < border->jointCount; ++j )
-				{
-					b2PrepareJoint( border->joints[j], context );
-				}
-
-				borderDone[bi] = true;
-				bordersPrepared += 1;
-			}
-		}
-
-		if ( bordersPrepared < borderCount )
+		// Spin-wait until both adjacent clusters have finished preparation
+		while ( b2AtomicLoadInt( &clusterData[border->clusterA].prepareComplete ) == 0 ||
+				b2AtomicLoadInt( &clusterData[border->clusterB].prepareComplete ) == 0 )
 		{
 			b2Pause();
+		}
+
+		if ( border->contactCount > 0 )
+		{
+			b2PrepareContactConstraints( context, border->contacts, border->contactConstraints, border->contactCount );
+		}
+
+		for ( int j = 0; j < border->jointCount; ++j )
+		{
+			b2PrepareJoint( border->joints[j], context );
 		}
 	}
 
@@ -1152,6 +890,12 @@ static void b2WarmStartWorkerClusters( b2StepContext* context, int workerIndex )
 
 	b2ClusterSolveData* clusterData = context->clusterData;
 
+	float h = context->h;
+	float maxLinearSpeed = context->maxLinearVelocity;
+	float maxAngularSpeed = B2_MAX_ROTATION * context->inv_dt;
+	float maxLinearSpeedSquared = maxLinearSpeed * maxLinearSpeed;
+	float maxAngularSpeedSquared = maxAngularSpeed * maxAngularSpeed;
+
 	for ( int c = 0; c < B2_CLUSTER_COUNT; ++c )
 	{
 		if ( context->clusterWorkerMap[c] != workerIndex )
@@ -1161,6 +905,51 @@ static void b2WarmStartWorkerClusters( b2StepContext* context, int workerIndex )
 
 		b2ClusterSolveData* cd = clusterData + c;
 
+		// Integrate velocities for this cluster's bodies
+		for ( int i = 0; i < cd->bodyCount; ++i )
+		{
+			b2BodyState* state = cd->states + i;
+
+			b2Vec2 v = state->linearVelocity;
+			float w = state->angularVelocity;
+
+			v = b2MulAdd( v, h * state->invMass, state->force );
+			w += h * state->invInertia * state->torque;
+
+			if ( b2Dot( v, v ) > maxLinearSpeedSquared )
+			{
+				float ratio = maxLinearSpeed / b2Length( v );
+				v = b2MulSV( ratio, v );
+				state->flags |= b2_isSpeedCapped;
+			}
+
+			if ( w * w > maxAngularSpeedSquared && ( state->flags & b2_allowFastRotation ) == 0 )
+			{
+				float ratio = maxAngularSpeed / b2AbsFloat( w );
+				w *= ratio;
+				state->flags |= b2_isSpeedCapped;
+			}
+
+			if ( state->flags & b2_lockLinearX )
+			{
+				v.x = 0.0f;
+			}
+
+			if ( state->flags & b2_lockLinearY )
+			{
+				v.y = 0.0f;
+			}
+
+			if ( state->flags & b2_lockAngularZ )
+			{
+				w = 0.0f;
+			}
+
+			state->linearVelocity = v;
+			state->angularVelocity = w;
+		}
+
+		// Warm start constraints for this cluster
 		if ( cd->contactCount > 0 )
 		{
 			b2WarmStartContactConstraints( context, cd->contactConstraints, cd->contactCount );
@@ -1191,41 +980,25 @@ static void b2WarmStartBordersWhenReady( b2StepContext* context )
 		return;
 	}
 
-	int bordersStarted = 0;
-	bool borderDone[B2_MAX_BORDERS];
-	memset( borderDone, 0, (size_t)borderCount * sizeof( bool ) );
-
-	while ( bordersStarted < borderCount )
+	for ( int bi = 0; bi < borderCount; ++bi )
 	{
-		for ( int bi = 0; bi < borderCount; ++bi )
-		{
-			if ( borderDone[bi] )
-			{
-				continue;
-			}
+		b2BorderConstraints* border = borders + bi;
 
-			b2BorderConstraints* border = borders + bi;
-			if ( b2AtomicLoadInt( &clusterData[border->clusterA].warmStartComplete ) &&
-				 b2AtomicLoadInt( &clusterData[border->clusterB].warmStartComplete ) )
-			{
-				if ( border->contactCount > 0 )
-				{
-					b2WarmStartContactConstraints( context, border->contactConstraints, border->contactCount );
-				}
-
-				for ( int k = 0; k < border->jointCount; ++k )
-				{
-					b2WarmStartJoint( border->joints[k], context );
-				}
-
-				borderDone[bi] = true;
-				bordersStarted += 1;
-			}
-		}
-
-		if ( bordersStarted < borderCount )
+		// Spin-wait until both adjacent clusters have finished warm start
+		while ( b2AtomicLoadInt( &clusterData[border->clusterA].warmStartComplete ) == 0 ||
+				b2AtomicLoadInt( &clusterData[border->clusterB].warmStartComplete ) == 0 )
 		{
 			b2Pause();
+		}
+
+		if ( border->contactCount > 0 )
+		{
+			b2WarmStartContactConstraints( context, border->contactConstraints, border->contactCount );
+		}
+
+		for ( int k = 0; k < border->jointCount; ++k )
+		{
+			b2WarmStartJoint( border->joints[k], context );
 		}
 	}
 
@@ -1313,20 +1086,11 @@ static void b2SolverTask( int startIndex, int endIndex, uint32_t threadIndexIgno
 		// Main thread synchronizes the workers and does work itself.
 		uint64_t ticks = b2GetTicks();
 
-		int bodySyncIndex = 1;
 		int stageIndex = 0;
-
-		// Stage 0: Prepare joints (parallel-for)
-		uint32_t jointSyncIndex = 1;
-		uint32_t syncBits = ( jointSyncIndex << 16 ) | stageIndex;
-		B2_ASSERT( stages[stageIndex].type == b2_stagePrepareJoints );
-		b2ExecuteMainStage( stages + stageIndex, context, syncBits );
-		stageIndex += 1;
-		jointSyncIndex += 1;
 
 		// Prepare cluster and border constraints (parallel across workers)
 		{
-			syncBits = ( 1 << 16 ) | stageIndex;
+			uint32_t syncBits = ( 1 << 16 ) | stageIndex;
 			B2_ASSERT( stages[stageIndex].type == b2_stagePrepareClusters );
 			b2ExecuteClusterPreparePhase( context, stages + stageIndex, syncBits );
 			stageIndex += 1;
@@ -1341,54 +1105,44 @@ static void b2SolverTask( int startIndex, int endIndex, uint32_t threadIndexIgno
 		{
 			int iterationStageIndex = stageIndex;
 
-			// Integrate velocities (parallel-for)
-			syncBits = ( bodySyncIndex << 16 ) | iterationStageIndex;
-			B2_ASSERT( stages[iterationStageIndex].type == b2_stageIntegrateVelocities );
-			b2ExecuteMainStage( stages + iterationStageIndex, context, syncBits );
-			iterationStageIndex += 1;
-			bodySyncIndex += 1;
-
-			profile->integrateVelocities += b2GetMillisecondsAndReset( &ticks );
-
-			// Warm start cluster and border constraints (parallel across workers)
+			// Integrate velocities and warm start cluster/border constraints (parallel across workers)
 			{
-				syncBits = ( clusterSyncIndex << 16 ) | iterationStageIndex;
+				uint32_t syncBits = ( clusterSyncIndex << 16 ) | iterationStageIndex;
 				B2_ASSERT( stages[iterationStageIndex].type == b2_stageWarmStartClusters );
 				b2ExecuteClusterWarmStartPhase( context, stages + iterationStageIndex, syncBits );
 				clusterSyncIndex += 1;
 			}
 			iterationStageIndex += 1;
 
+			profile->warmStart += b2GetMillisecondsAndReset( &ticks );
+
 			// Solve constraints
+			bool useBias = true;
+			bool isRestitution = false;
 			for ( int j = 0; j < ITERATIONS; ++j )
 			{
 				// Cluster solve phase
-				syncBits = ( clusterSyncIndex << 16 ) | iterationStageIndex;
+				uint32_t syncBits = ( clusterSyncIndex << 16 ) | iterationStageIndex;
 				B2_ASSERT( stages[iterationStageIndex].type == b2_stageSolveClusters );
-				b2ExecuteClusterPhase( context, stages + iterationStageIndex, syncBits, true, false );
+				b2ExecuteClusterPhase( context, stages + iterationStageIndex, syncBits, useBias, isRestitution );
 				clusterSyncIndex += 1;
 			}
 			iterationStageIndex += 1;
 
 			profile->solveImpulses += b2GetMillisecondsAndReset( &ticks );
 
-			// Integrate positions (parallel-for)
-			B2_ASSERT( stages[iterationStageIndex].type == b2_stageIntegratePositions );
-			syncBits = ( bodySyncIndex << 16 ) | iterationStageIndex;
-			b2ExecuteMainStage( stages + iterationStageIndex, context, syncBits );
-			iterationStageIndex += 1;
-			bodySyncIndex += 1;
-
-			profile->integratePositions += b2GetMillisecondsAndReset( &ticks );
-
-			// Relax constraints
+			// Relax constraints (first iteration also integrates positions)
+			useBias = false;
+			isRestitution = false;
 			for ( int j = 0; j < RELAX_ITERATIONS; ++j )
 			{
+				bool isFirstRelax = ( j == 0 );
 				bool isLastRelax = ( subStepIndex == subStepCount - 1 ) && ( j == RELAX_ITERATIONS - 1 );
+				stages[iterationStageIndex].integratePositions = isFirstRelax;
 				stages[iterationStageIndex].storeImpulses = isLastRelax;
-				syncBits = ( clusterSyncIndex << 16 ) | iterationStageIndex;
+				uint32_t syncBits = ( clusterSyncIndex << 16 ) | iterationStageIndex;
 				B2_ASSERT( stages[iterationStageIndex].type == b2_stageRelaxClusters );
-				b2ExecuteClusterPhase( context, stages + iterationStageIndex, syncBits, false, false );
+				b2ExecuteClusterPhase( context, stages + iterationStageIndex, syncBits, useBias, isRestitution );
 				clusterSyncIndex += 1;
 			}
 			iterationStageIndex += 1;
@@ -1397,25 +1151,20 @@ static void b2SolverTask( int startIndex, int endIndex, uint32_t threadIndexIgno
 		}
 
 		// Advance stage index past sub-step stages:
-		// integrate velocities + warm start clusters + solve clusters + integrate positions + relax clusters
-		stageIndex += 1 + 1 + ITERATIONS + 1 + RELAX_ITERATIONS;
+		// warm start clusters + solve clusters + relax clusters
+		stageIndex += 1 + ITERATIONS + RELAX_ITERATIONS;
 
 		// Restitution
 		{
-			syncBits = ( clusterSyncIndex << 16 ) | stageIndex;
+			uint32_t syncBits = ( clusterSyncIndex << 16 ) | stageIndex;
 			B2_ASSERT( stages[stageIndex].type == b2_stageRestitutionClusters );
-			b2ExecuteClusterPhase( context, stages + stageIndex, syncBits, false, true );
+			bool useBias = false;
+			bool isRestitution = true;
+			b2ExecuteClusterPhase( context, stages + stageIndex, syncBits, useBias, isRestitution );
 			stageIndex += 1;
 		}
 
 		profile->applyRestitution += b2GetMillisecondsAndReset( &ticks );
-
-		{
-			b2TracyCZoneNC( store_impulses, "Store Impulses", b2_colorIndigo, true );
-			b2TracyCZoneEnd( store_impulses );
-		}
-
-		profile->storeImpulses += b2GetMillisecondsAndReset( &ticks );
 
 		// Signal workers to finish
 		b2AtomicStoreU32( &context->atomicSyncBits, UINT_MAX );
@@ -1457,7 +1206,7 @@ static void b2SolverTask( int startIndex, int endIndex, uint32_t threadIndexIgno
 		int syncIndex = ( syncBits >> 16 ) & 0xFFFF;
 		B2_ASSERT( syncIndex > 0 );
 
-		int previousSyncIndex = syncIndex - 1;
+		//int previousSyncIndex = syncIndex - 1;
 
 		b2SolverStage* stage = stages + stageIndex;
 
@@ -1493,7 +1242,7 @@ static void b2SolverTask( int startIndex, int endIndex, uint32_t threadIndexIgno
 		else
 		{
 			// Parallel-for phase: claim and execute blocks
-			b2ExecuteStage( stage, context, previousSyncIndex, syncIndex, workerIndex );
+			// b2ExecuteStage( stage, context, previousSyncIndex, syncIndex, workerIndex );
 		}
 
 		lastSyncBits = syncBits;
@@ -1551,75 +1300,28 @@ void b2Solve( b2World* world, b2StepContext* stepContext )
 
 	// Solve constraints using cluster-based solver
 	{
-		// Prepare buffers for bullets
-		b2AtomicStoreInt( &stepContext->bulletBodyCount, 0 );
-		stepContext->bulletBodies = b2AllocateArenaItem( &world->arena, awakeBodyCount * sizeof( b2Body* ), "bullet bodies" );
-
 		b2TracyCZoneNC( prepare_stages, "Prepare Stages", b2_colorDarkOrange, true );
 		uint64_t prepareTicks = b2GetTicks();
 
-		int awakeJointCount = awakeSet->jointSims.count;
+		// Prepare buffers for bullets
+		b2AtomicStoreInt( &stepContext->bulletBodyCount, 0 );
+		stepContext->bulletBodies = b2AllocateArenaItem( &world->arena, awakeBodyCount * sizeof( b2Body* ), "bullet bodies" );
 
 		// prepare for move events
 		b2BodyMoveEventArray_Resize( &world->bodyMoveEvents, awakeBodyCount );
 
 		int workerCount = world->workerCount;
 
-		const int blocksPerWorker = 4;
-		const int maxBlockCount = blocksPerWorker * workerCount;
-
-		// Configure blocks for body parallel-for tasks
-		int bodyBlockSize = 1 << 5;
-		int bodyBlockCount;
-		if ( awakeBodyCount > bodyBlockSize * maxBlockCount )
-		{
-			bodyBlockSize = awakeBodyCount / maxBlockCount;
-			bodyBlockCount = maxBlockCount;
-		}
-		else
-		{
-			bodyBlockCount = ( ( awakeBodyCount - 1 ) >> 5 ) + 1;
-		}
-
-		// Gather joint pointers for parallel-for prepare
-		b2JointSim** joints = NULL;
-		if ( awakeJointCount > 0 )
-		{
-			joints = b2AllocateArenaItem( &world->arena, awakeJointCount * sizeof( b2JointSim* ), "joint pointers" );
-			for ( int i = 0; i < awakeJointCount; ++i )
-			{
-				joints[i] = awakeSet->jointSims.data + i;
-			}
-		}
-
-		// Configure joint blocks for prepare parallel-for
-		int jointBlockSize = blocksPerWorker;
-		int jointBlockCount = awakeJointCount > 0 ? ( ( awakeJointCount - 1 ) / blocksPerWorker ) + 1 : 0;
-		if ( awakeJointCount > jointBlockSize * maxBlockCount )
-		{
-			jointBlockSize = awakeJointCount / maxBlockCount;
-			jointBlockCount = maxBlockCount;
-		}
-
-		// Stage setup: prepare joints, prepare clusters, warm start clusters, integrate velocities, solve clusters, integrate
-		// positions, relax clusters, restitution
+		// Stage setup: prepare joints, prepare clusters, warm start clusters (includes velocity integration),
+		// solve clusters, relax clusters (includes position integration), restitution
 		int stageCount = 0;
-		stageCount += 1; // b2_stagePrepareJoints
 		stageCount += 1; // b2_stagePrepareClusters
-		stageCount += 1; // b2_stageWarmStartClusters (reused per sub-step)
-		stageCount += 1; // b2_stageIntegrateVelocities (reused per sub-step)
+		stageCount += 1; // b2_stageWarmStartClusters (reused per sub-step, integrates velocities then warm starts)
 		stageCount += 1; // b2_stageSolveClusters (reused per sub-step per iteration)
-		stageCount += 1; // b2_stageIntegratePositions (reused per sub-step)
 		stageCount += 1; // b2_stageRelaxClusters (reused per sub-step per iteration)
 		stageCount += 1; // b2_stageRestitutionClusters
 
 		b2SolverStage* stages = b2AllocateArenaItem( &world->arena, stageCount * sizeof( b2SolverStage ), "stages" );
-		b2SolverBlock* bodyBlocks = b2AllocateArenaItem( &world->arena, bodyBlockCount * sizeof( b2SolverBlock ), "body blocks" );
-		b2SolverBlock* jointBlocks = NULL;
-		if ( jointBlockCount > 0 )
-		{
-			jointBlocks = b2AllocateArenaItem( &world->arena, jointBlockCount * sizeof( b2SolverBlock ), "joint blocks" );
-		}
 
 		// Classify constraints into clusters and borders
 		// These allocations happen after stages/blocks so arena LIFO free order works
@@ -1700,94 +1402,38 @@ void b2Solve( b2World* world, b2StepContext* stepContext )
 			world->activeTaskCount += splitIslandTask == NULL ? 0 : 1;
 		}
 
-		// Prepare body work blocks
-		for ( int i = 0; i < bodyBlockCount; ++i )
-		{
-			b2SolverBlock* block = bodyBlocks + i;
-			block->startIndex = i * bodyBlockSize;
-			block->count = (int16_t)bodyBlockSize;
-			block->blockType = b2_bodyBlock;
-			b2AtomicStoreInt( &block->syncIndex, 0 );
-		}
-		bodyBlocks[bodyBlockCount - 1].count = (int16_t)( awakeBodyCount - ( bodyBlockCount - 1 ) * bodyBlockSize );
-
-		// Prepare joint work blocks
-		for ( int i = 0; i < jointBlockCount; ++i )
-		{
-			b2SolverBlock* block = jointBlocks + i;
-			block->startIndex = i * jointBlockSize;
-			block->count = (int16_t)jointBlockSize;
-			block->blockType = b2_jointBlock;
-			b2AtomicStoreInt( &block->syncIndex, 0 );
-		}
-		if ( jointBlockCount > 0 )
-		{
-			jointBlocks[jointBlockCount - 1].count = (int16_t)( awakeJointCount - ( jointBlockCount - 1 ) * jointBlockSize );
-		}
-
 		// Set up stages
 		b2SolverStage* stage = stages;
 
-		// Prepare joints (parallel-for)
-		stage->type = b2_stagePrepareJoints;
-		stage->blocks = jointBlocks;
-		stage->blockCount = jointBlockCount;
-
-		b2AtomicStoreInt( &stage->completionCount, 0 );
-		stage += 1;
-
 		// Prepare clusters (cluster phase, runs once)
 		stage->type = b2_stagePrepareClusters;
-		stage->blocks = NULL;
-		stage->blockCount = 0;
 
 		b2AtomicStoreInt( &stage->completionCount, 0 );
 		stage += 1;
 
-		// Integrate velocities (parallel-for, reused per sub-step)
-		stage->type = b2_stageIntegrateVelocities;
-		stage->blocks = bodyBlocks;
-		stage->blockCount = bodyBlockCount;
-
-		b2AtomicStoreInt( &stage->completionCount, 0 );
-		stage += 1;
-
-		// Warm start clusters (cluster phase, reused per sub-step)
+		// Warm start clusters (cluster phase, reused per sub-step; integrates velocities then warm starts)
 		stage->type = b2_stageWarmStartClusters;
-		stage->blocks = NULL;
-		stage->blockCount = 0;
 
 		b2AtomicStoreInt( &stage->completionCount, 0 );
 		stage += 1;
 
 		// Solve clusters (cluster phase, reused per sub-step per iteration)
 		stage->type = b2_stageSolveClusters;
-		stage->blocks = NULL;
-		stage->blockCount = 0;
-
-		b2AtomicStoreInt( &stage->completionCount, 0 );
-		stage += 1;
-
-		// Integrate positions (parallel-for, reused per sub-step)
-		stage->type = b2_stageIntegratePositions;
-		stage->blocks = bodyBlocks;
-		stage->blockCount = bodyBlockCount;
+		stage->integratePositions = false;
 
 		b2AtomicStoreInt( &stage->completionCount, 0 );
 		stage += 1;
 
 		// Relax clusters (cluster phase, reused per sub-step per iteration)
 		stage->type = b2_stageRelaxClusters;
-		stage->blocks = NULL;
-		stage->blockCount = 0;
+		stage->integratePositions = false;
 
 		b2AtomicStoreInt( &stage->completionCount, 0 );
 		stage += 1;
 
 		// Restitution clusters
 		stage->type = b2_stageRestitutionClusters;
-		stage->blocks = NULL;
-		stage->blockCount = 0;
+		stage->integratePositions = false;
 
 		b2AtomicStoreInt( &stage->completionCount, 0 );
 		stage += 1;
@@ -1797,7 +1443,6 @@ void b2Solve( b2World* world, b2StepContext* stepContext )
 		B2_ASSERT( workerCount <= B2_MAX_WORKERS );
 		b2WorkerContext workerContext[B2_MAX_WORKERS];
 
-		stepContext->joints = joints;
 		stepContext->workerCount = workerCount;
 		stepContext->stageCount = stageCount;
 		stepContext->stages = stages;
@@ -1917,17 +1562,7 @@ void b2Solve( b2World* world, b2StepContext* stepContext )
 			b2FreeArenaItem( &world->arena, clusterData );
 		}
 
-		if ( jointBlocks != NULL )
-		{
-			b2FreeArenaItem( &world->arena, jointBlocks );
-		}
-		b2FreeArenaItem( &world->arena, bodyBlocks );
 		b2FreeArenaItem( &world->arena, stages );
-
-		if ( joints != NULL )
-		{
-			b2FreeArenaItem( &world->arena, joints );
-		}
 
 		world->profile.transforms = b2GetMilliseconds( transformTicks );
 		b2TracyCZoneEnd( update_transforms );

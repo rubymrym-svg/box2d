@@ -102,6 +102,25 @@
 	#define b2TracyCFrame
 #endif
 
+// Software prefetch into L1 cache
+#if defined( _MSC_VER )
+#include <intrin.h>
+static inline void b2Prefetch( const void* p )
+{
+	_mm_prefetch( (const char*)p, _MM_HINT_T0 );
+}
+#elif defined( __GNUC__ ) || defined( __clang__ )
+static inline void b2Prefetch( const void* p )
+{
+	__builtin_prefetch( p, 0, 3 );
+}
+#else
+static inline void b2Prefetch( const void* p )
+{
+	(void)p;
+}
+#endif
+
 // clang-format on
 
 // Returns the number of elements of an array

@@ -1220,11 +1220,6 @@ static void b2SolverTask( int startIndex, int endIndex, uint32_t threadIndexIgno
 		int stageIndex = syncBits & 0xFFFF;
 		B2_ASSERT( stageIndex < context->stageCount );
 
-		int syncIndex = ( syncBits >> 16 ) & 0xFFFF;
-		B2_ASSERT( syncIndex > 0 );
-
-		//int previousSyncIndex = syncIndex - 1;
-
 		b2SolverStage* stage = stages + stageIndex;
 
 		// Branch on stage type: cluster phases vs parallel-for phases
@@ -1247,11 +1242,7 @@ static void b2SolverTask( int startIndex, int endIndex, uint32_t threadIndexIgno
 
 			b2SolveWorkerClusters( context, workerIndex, useBias, isRestitution, stage );
 		}
-		else
-		{
-			// Parallel-for phase: claim and execute blocks
-			// b2ExecuteStage( stage, context, previousSyncIndex, syncIndex, workerIndex );
-		}
+
 
 		lastSyncBits = syncBits;
 	}

@@ -39,8 +39,6 @@ typedef struct b2SolverStage
 	b2SolverStageType type;
 	bool storeImpulses;
 	bool integratePositions;
-	// todo consider false sharing of this atomic
-	b2AtomicInt completionCount;
 } b2SolverStage;
 
 // Context for a time step. Recreated each time step.

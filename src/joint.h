@@ -32,11 +32,7 @@ typedef struct b2Joint
 	// B2_NULL_INDEX when slot is free
 	int setIndex;
 
-	// index into the constraint graph color array, may be B2_NULL_INDEX for sleeping/disabled joints
-	// B2_NULL_INDEX when slot is free
-	int colorIndex;
-
-	// joint index within set or graph color
+	// joint index within set
 	// B2_NULL_INDEX when slot is free
 	int localIndex;
 
@@ -79,8 +75,6 @@ typedef struct b2DistanceJoint
 	float upperImpulse;
 	float motorImpulse;
 
-	int indexA;
-	int indexB;
 	b2Vec2 anchorA;
 	b2Vec2 anchorB;
 	b2Vec2 deltaCenter;
@@ -113,8 +107,6 @@ typedef struct b2MotorJoint
 	b2Softness linearSpring;
 	b2Softness angularSpring;
 
-	int indexA;
-	int indexB;
 	b2Transform frameA;
 	b2Transform frameB;
 	b2Vec2 deltaCenter;
@@ -137,8 +129,6 @@ typedef struct b2PrismaticJoint
 	float lowerTranslation;
 	float upperTranslation;
 
-	int indexA;
-	int indexB;
 	b2Transform frameA;
 	b2Transform frameB;
 	b2Vec2 deltaCenter;
@@ -164,8 +154,6 @@ typedef struct b2RevoluteJoint
 	float lowerAngle;
 	float upperAngle;
 
-	int indexA;
-	int indexB;
 	b2Transform frameA;
 	b2Transform frameB;
 	b2Vec2 deltaCenter;
@@ -189,8 +177,6 @@ typedef struct b2WeldJoint
 	b2Vec2 linearImpulse;
 	float angularImpulse;
 
-	int indexA;
-	int indexB;
 	b2Transform frameA;
 	b2Transform frameB;
 	b2Vec2 deltaCenter;
@@ -211,8 +197,6 @@ typedef struct b2WheelJoint
 	float hertz;
 	float dampingRatio;
 
-	int indexA;
-	int indexB;
 	b2Transform frameA;
 	b2Transform frameB;
 	b2Vec2 deltaCenter;
@@ -234,14 +218,13 @@ typedef struct b2JointSim
 
 	int bodyIdA;
 	int bodyIdB;
+	int stateIndexA;
+	int stateIndexB;
 
 	b2JointType type;
 
 	b2Transform localFrameA;
 	b2Transform localFrameB;
-
-	float invMassA, invMassB;
-	float invIA, invIB;
 
 	float constraintHertz;
 	float constraintDampingRatio;
@@ -271,10 +254,6 @@ b2JointSim* b2GetJointSimCheckType( b2JointId jointId, b2JointType type );
 void b2PrepareJoint( b2JointSim* joint, b2StepContext* context );
 void b2WarmStartJoint( b2JointSim* joint, b2StepContext* context );
 void b2SolveJoint( b2JointSim* joint, b2StepContext* context, bool useBias );
-
-void b2PrepareOverflowJoints( b2StepContext* context );
-void b2WarmStartOverflowJoints( b2StepContext* context );
-void b2SolveOverflowJoints( b2StepContext* context, bool useBias );
 
 void b2GetJointReaction( b2JointSim* sim, float invTimeStep, float* force, float* torque );
 

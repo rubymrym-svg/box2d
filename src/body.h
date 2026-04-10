@@ -67,8 +67,7 @@ typedef struct b2Body
 	// may be B2_NULL_INDEX
 	int setIndex;
 
-	// body sim and state index within set
-	// may be B2_NULL_INDEX
+	// index within set
 	int localIndex;
 
 	// [31 : contactId | 1 : edgeIndex]
@@ -99,6 +98,9 @@ typedef struct b2Body
 	float sleepThreshold;
 	float sleepTime;
 
+	float minExtent;
+	float maxExtent;
+
 	// this is used to adjust the fellAsleep flag in the body move array
 	int bodyMoveIndex;
 
@@ -109,12 +111,46 @@ typedef struct b2Body
 
 	b2BodyType type;
 
+	// transform for body origin
+	b2Transform transform;
+
+	// center of mass position in world space
+	b2Vec2 center;
+
+	// previous rotation and COM for TOI
+	b2Rot rotation0;
+	b2Vec2 center0;
+
+	// location of center of mass relative to the body origin
+	b2Vec2 localCenter;
+
+	b2Vec2 linearVelocity;
+	float angularVelocity;
+
+	b2Vec2 force;
+	float torque;
+
+	// inverse inertia
+	float invMass;
+	float invInertia;
+
+	float linearDamping;
+	float angularDamping;
+	float gravityScale;
+
+	// State index in b2StepContext
+	int stateIndex;
+
+	int16_t clusterIndex;
+	
 	// This is monotonically advanced when a body is allocated in this slot
 	// Used to check for invalid b2BodyId
 	uint16_t generation;
 
 	// todo move into flags
 	bool enableSleep;
+
+
 } b2Body;
 
 // Body State
@@ -143,15 +179,22 @@ typedef struct b2Body
 // according to substep progress. Contacts have reduced stability when anchors are rotated during substeps, especially for
 // round shapes.
 
-// 32 bytes
 typedef struct b2BodyState
 {
 	b2Vec2 linearVelocity; // 8
 	float angularVelocity; // 4
 
+	b2Vec2 force;
+	float torque;
+
+	float invMass;
+	float invInertia;
+
 	// b2BodyFlags
 	// Important flags: locking, dynamic
 	uint32_t flags; // 4
+
+	int bodyId;
 
 	// Using delta position reduces round-off error far from the origin
 	b2Vec2 deltaPosition; // 8
@@ -162,8 +205,9 @@ typedef struct b2BodyState
 } b2BodyState;
 
 // Identity body state, notice the deltaRotation is {1, 0}
-static const b2BodyState b2_identityBodyState = { { 0.0f, 0.0f }, 0.0f, 0, { 0.0f, 0.0f }, { 1.0f, 0.0f } };
+static const b2BodyState b2_identityBodyState = { { 0.0f, 0.0f }, 0.0f, { 0.0f, 0.0f }, 0.0f, 0.0f, 0.0f, 0, B2_NULL_INDEX, { 0.0f, 0.0f }, { 1.0f, 0.0f } };
 
+#if 0
 // Body simulation data used for integration of position and velocity
 // Transform data used for collision and solver preparation.
 typedef struct b2BodySim
@@ -188,8 +232,6 @@ typedef struct b2BodySim
 	float invMass;
 	float invInertia;
 
-	float minExtent;
-	float maxExtent;
 	float linearDamping;
 	float angularDamping;
 	float gravityScale;
@@ -206,6 +248,7 @@ typedef struct b2BodySim
 	// b2BodyFlags
 	uint32_t flags;
 } b2BodySim;
+#endif
 
 // Get a validated body from a world using an id.
 b2Body* b2GetBodyFullId( b2World* world, b2BodyId bodyId );
@@ -218,16 +261,16 @@ b2BodyId b2MakeBodyId( b2World* world, int bodyId );
 
 bool b2ShouldBodiesCollide( b2World* world, b2Body* bodyA, b2Body* bodyB );
 
-b2BodySim* b2GetBodySim( b2World* world, b2Body* body );
-b2BodyState* b2GetBodyState( b2World* world, b2Body* body );
-void b2RemoveBodySim( b2BodySimArray* bodySims, b2BodyArray* bodies, int localIndex );
+// b2BodySim* b2GetBodySim( b2World* world, b2Body* body );
+// b2BodyState* b2GetBodyState( b2World* world, b2Body* body );
+void b2RemoveBodyFromSet( struct b2SolverSet* set, b2BodyArray* bodies, int localIndex );
 
 // careful calling this because it can invalidate body, state, joint, and contact pointers
 bool b2WakeBody( b2World* world, b2Body* body );
 
 void b2UpdateBodyMassData( b2World* world, b2Body* body );
 
-static inline b2Sweep b2MakeSweep( const b2BodySim* bodySim )
+static inline b2Sweep b2MakeSweep( const b2Body* bodySim )
 {
 	b2Sweep s;
 	s.c1 = bodySim->center0;
@@ -240,5 +283,4 @@ static inline b2Sweep b2MakeSweep( const b2BodySim* bodySim )
 
 // Define inline functions for arrays
 B2_ARRAY_INLINE( b2Body, b2Body )
-B2_ARRAY_INLINE( b2BodySim, b2BodySim )
 B2_ARRAY_INLINE( b2BodyState, b2BodyState )

@@ -116,13 +116,6 @@ b2Joint* b2GetJointFullId( b2World* world, b2JointId jointId )
 
 b2JointSim* b2GetJointSim( b2World* world, b2Joint* joint )
 {
-	if ( joint->setIndex == b2_awakeSet )
-	{
-		B2_ASSERT( 0 <= joint->colorIndex && joint->colorIndex < B2_GRAPH_COLOR_COUNT );
-		b2GraphColor* color = world->constraintGraph.colors + joint->colorIndex;
-		return b2JointSimArray_Get( &color->jointSims, joint->localIndex );
-	}
-
 	b2SolverSet* set = b2SolverSetArray_Get( &world->solverSets, joint->setIndex );
 	return b2JointSimArray_Get( &set->jointSims, joint->localIndex );
 }
@@ -218,7 +211,6 @@ static b2JointPair b2CreateJoint( b2World* world, const b2JointDef* def, b2Joint
 	joint->userData = def->userData;
 	joint->generation += 1;
 	joint->setIndex = B2_NULL_INDEX;
-	joint->colorIndex = B2_NULL_INDEX;
 	joint->localIndex = B2_NULL_INDEX;
 	joint->islandId = B2_NULL_INDEX;
 	joint->islandIndex = B2_NULL_INDEX;
@@ -295,9 +287,13 @@ static b2JointPair b2CreateJoint( b2World* world, const b2JointDef* def, b2Joint
 			b2WakeSolverSet( world, maxSetIndex );
 		}
 
+		b2SolverSet* awakeSet = b2SolverSetArray_Get( &world->solverSets, b2_awakeSet );
 		joint->setIndex = b2_awakeSet;
+		joint->localIndex = awakeSet->jointSims.count;
 
-		jointSim = b2CreateJointInGraph( world, joint );
+		jointSim = b2JointSimArray_Add( &awakeSet->jointSims );
+		memset( jointSim, 0, sizeof( b2JointSim ) );
+
 		jointSim->jointId = jointId;
 		jointSim->bodyIdA = bodyIdA;
 		jointSim->bodyIdB = bodyIdB;
@@ -684,29 +680,20 @@ void b2DestroyJointInternal( b2World* world, b2Joint* joint, bool wakeBodies )
 	int setIndex = joint->setIndex;
 	int localIndex = joint->localIndex;
 
-	if ( setIndex == b2_awakeSet )
+	b2SolverSet* set = b2SolverSetArray_Get( &world->solverSets, setIndex );
+	int movedIndex = b2JointSimArray_RemoveSwap( &set->jointSims, localIndex );
+	if ( movedIndex != B2_NULL_INDEX )
 	{
-		b2RemoveJointFromGraph( world, joint->edges[0].bodyId, joint->edges[1].bodyId, joint->colorIndex, localIndex );
-	}
-	else
-	{
-		b2SolverSet* set = b2SolverSetArray_Get( &world->solverSets, setIndex );
-		int movedIndex = b2JointSimArray_RemoveSwap( &set->jointSims, localIndex );
-		if ( movedIndex != B2_NULL_INDEX )
-		{
-			// Fix moved joint
-			b2JointSim* movedJointSim = set->jointSims.data + localIndex;
-			int movedId = movedJointSim->jointId;
-			b2Joint* movedJoint = b2JointArray_Get( &world->joints, movedId );
-			B2_ASSERT( movedJoint->localIndex == movedIndex );
-			movedJoint->localIndex = localIndex;
-		}
+		b2JointSim* movedJointSim = set->jointSims.data + localIndex;
+		int movedId = movedJointSim->jointId;
+		b2Joint* movedJoint = b2JointArray_Get( &world->joints, movedId );
+		B2_ASSERT( movedJoint->localIndex == movedIndex );
+		movedJoint->localIndex = localIndex;
 	}
 
 	// Free joint and id (preserve joint generation)
 	joint->setIndex = B2_NULL_INDEX;
 	joint->localIndex = B2_NULL_INDEX;
-	joint->colorIndex = B2_NULL_INDEX;
 	joint->jointId = B2_NULL_INDEX;
 	b2FreeId( &world->jointIdPool, jointId );
 
@@ -1379,57 +1366,6 @@ void b2SolveJoint( b2JointSim* joint, b2StepContext* context, bool useBias )
 	}
 }
 
-void b2PrepareOverflowJoints( b2StepContext* context )
-{
-	b2TracyCZoneNC( prepare_joints, "PrepJoints", b2_colorOldLace, true );
-
-	b2ConstraintGraph* graph = context->graph;
-	b2JointSim* joints = graph->colors[B2_OVERFLOW_INDEX].jointSims.data;
-	int jointCount = graph->colors[B2_OVERFLOW_INDEX].jointSims.count;
-
-	for ( int i = 0; i < jointCount; ++i )
-	{
-		b2JointSim* joint = joints + i;
-		b2PrepareJoint( joint, context );
-	}
-
-	b2TracyCZoneEnd( prepare_joints );
-}
-
-void b2WarmStartOverflowJoints( b2StepContext* context )
-{
-	b2TracyCZoneNC( prepare_joints, "PrepJoints", b2_colorOldLace, true );
-
-	b2ConstraintGraph* graph = context->graph;
-	b2JointSim* joints = graph->colors[B2_OVERFLOW_INDEX].jointSims.data;
-	int jointCount = graph->colors[B2_OVERFLOW_INDEX].jointSims.count;
-
-	for ( int i = 0; i < jointCount; ++i )
-	{
-		b2JointSim* joint = joints + i;
-		b2WarmStartJoint( joint, context );
-	}
-
-	b2TracyCZoneEnd( prepare_joints );
-}
-
-void b2SolveOverflowJoints( b2StepContext* context, bool useBias )
-{
-	b2TracyCZoneNC( solve_joints, "Solve Overflow Joints", b2_colorLemonChiffon, true );
-
-	b2ConstraintGraph* graph = context->graph;
-	b2JointSim* joints = graph->colors[B2_OVERFLOW_INDEX].jointSims.data;
-	int jointCount = graph->colors[B2_OVERFLOW_INDEX].jointSims.count;
-
-	for ( int i = 0; i < jointCount; ++i )
-	{
-		b2JointSim* joint = joints + i;
-		b2SolveJoint( joint, context, useBias );
-	}
-
-	b2TracyCZoneEnd( solve_joints );
-}
-
 void b2DrawJoint( b2DebugDraw* draw, b2World* world, b2Joint* joint )
 {
 	b2Body* bodyA = b2BodyArray_Get( &world->bodies, joint->edges[0].bodyId );
@@ -1487,16 +1423,6 @@ void b2DrawJoint( b2DebugDraw* draw, b2World* world, b2Joint* joint )
 			draw->DrawLineFcn( pA, pB, color, draw->context );
 			draw->DrawLineFcn( transformB.p, pB, color, draw->context );
 			break;
-	}
-
-	if ( draw->drawGraphColors )
-	{
-		int colorIndex = joint->colorIndex;
-		if ( colorIndex != B2_NULL_INDEX )
-		{
-			b2Vec2 p = b2Lerp( pA, pB, 0.5f );
-			draw->DrawPointFcn( p, 5.0f, b2_graphColors[colorIndex], draw->context );
-		}
 	}
 
 	if ( draw->drawJointExtras )

@@ -6,7 +6,6 @@
 #include "arena_allocator.h"
 #include "array.h"
 #include "body.h"
-#include "constraint_graph.h"
 #include "contact.h"
 #include "contact_solver.h"
 #include "joint.h"
@@ -23,7 +22,7 @@ void b2CreateClusters( b2ClusterManager* manager )
 	for ( int i = 0; i < B2_CLUSTER_COUNT; ++i )
 	{
 		b2Cluster* cluster = manager->clusters + i;
-		cluster->bodyIndices = b2IntArray_Create( 16 );
+		b2Array_CreateN( cluster->bodyIds, 16 );
 	}
 }
 
@@ -32,22 +31,22 @@ void b2DestroyClusters( b2ClusterManager* manager )
 	for ( int i = 0; i < B2_CLUSTER_COUNT; ++i )
 	{
 		b2Cluster* cluster = manager->clusters + i;
-		b2IntArray_Destroy( &cluster->bodyIndices );
+		b2Array_Destroy( cluster->bodyIds );
 	}
 }
 
-void b2ComputeClusters( b2World* world )
+void b2ComputeClusters( b2World* world, b2StepContext* context )
 {
 	b2ClusterManager* manager = &world->clusterManager;
 	b2Cluster* clusters = manager->clusters;
 
 	b2SolverSet* awakeSet = b2SolverSetArray_Get( &world->solverSets, b2_awakeSet );
-	int awakeCount = awakeSet->bodySims.count;
-	b2BodySim* bodySims = awakeSet->bodySims.data;
+	int awakeCount = awakeSet->bodyIds.count;
+	int* bodyIds = awakeSet->bodyIds.data;
 
 	for ( int i = 0; i < B2_CLUSTER_COUNT; ++i )
 	{
-		b2IntArray_Clear( &clusters[i].bodyIndices );
+		clusters[i].bodyIds.count = 0;
 	}
 
 	if ( awakeCount == 0 )
@@ -61,27 +60,26 @@ void b2ComputeClusters( b2World* world )
 		int seedCount = b2MinInt( awakeCount, B2_CLUSTER_COUNT );
 		for ( int i = 0; i < seedCount; ++i )
 		{
-			clusters[i].center = bodySims[i].center;
-			b2IntArray_Push( &clusters[i].bodyIndices, i );
-			bodySims[i].clusterIndex = i;
-		}
-
-		if ( awakeCount < B2_CLUSTER_COUNT )
-		{
-			return;
+			b2Body* body = b2BodyArray_Get( &world->bodies, bodyIds[i] );
+			clusters[i].center = body->center;
+			b2Array_Push( clusters[i].bodyIds, bodyIds[i] );
+			body->clusterIndex = (int16_t)i;
 		}
 
 		for ( int iteration = 0; iteration < 32; ++iteration )
 		{
+			// Reset
 			for ( int i = 0; i < B2_CLUSTER_COUNT; ++i )
 			{
 				clusters[i].accumulator = b2Vec2_zero;
-				clusters[i].bodyIndices.count = 0;
+				clusters[i].bodyIds.count = 0;
 			}
 
 			for ( int i = 0; i < awakeCount; ++i )
 			{
-				b2Vec2 p = bodySims[i].center;
+				int bodyId = bodyIds[i];
+				b2Body* body = b2BodyArray_Get( &world->bodies, bodyId );
+				b2Vec2 p = body->center;
 
 				float minDistanceSquared = b2DistanceSquared( p, clusters[0].center );
 				int bestIndex = 0;
@@ -96,14 +94,14 @@ void b2ComputeClusters( b2World* world )
 					}
 				}
 
-				bodySims[i].clusterIndex = bestIndex;
-				b2IntArray_Push( &clusters[bestIndex].bodyIndices, i );
+				body->clusterIndex = (int16_t)bestIndex;
+				b2Array_Push( clusters[bestIndex].bodyIds, bodyId );
 				clusters[bestIndex].accumulator = b2Add( clusters[bestIndex].accumulator, p );
 			}
 
 			for ( int i = 0; i < B2_CLUSTER_COUNT; ++i )
 			{
-				int clusterBodyCount = clusters[i].bodyIndices.count;
+				int clusterBodyCount = clusters[i].bodyIds.count;
 				if ( clusterBodyCount > 0 )
 				{
 					clusters[i].center = b2MulSV( 1.0f / clusterBodyCount, clusters[i].accumulator );
@@ -112,68 +110,107 @@ void b2ComputeClusters( b2World* world )
 		}
 
 		manager->initialized = true;
-		return;
 	}
-
-	// Incremental: refine clusters using persistent centers
-	for ( int iteration = 0; iteration < 4; ++iteration )
+	else
 	{
-		for ( int i = 0; i < B2_CLUSTER_COUNT; ++i )
+		// Incremental: refine clusters using persistent centers
+		for ( int iteration = 0; iteration < 4; ++iteration )
 		{
-			clusters[i].accumulator = b2Vec2_zero;
-			clusters[i].bodyIndices.count = 0;
-		}
-
-		// Assign each body to nearest cluster center
-		for ( int i = 0; i < awakeCount; ++i )
-		{
-			b2Vec2 p = bodySims[i].center;
-
-			float minDistanceSquared = b2DistanceSquared( p, clusters[0].center );
-			int bestIndex = 0;
-
-			for ( int j = 1; j < B2_CLUSTER_COUNT; ++j )
+			for ( int i = 0; i < B2_CLUSTER_COUNT; ++i )
 			{
-				float distanceSquared = b2DistanceSquared( p, clusters[j].center );
-				if ( distanceSquared < minDistanceSquared )
-				{
-					minDistanceSquared = distanceSquared;
-					bestIndex = j;
-				}
+				clusters[i].accumulator = b2Vec2_zero;
+				clusters[i].bodyIds.count = 0;
 			}
 
-			bodySims[i].clusterIndex = bestIndex;
-			b2IntArray_Push( &clusters[bestIndex].bodyIndices, i );
-			clusters[bestIndex].accumulator = b2Add( clusters[bestIndex].accumulator, p );
-		}
+			// Assign each body to nearest cluster center
+			for ( int i = 0; i < awakeCount; ++i )
+			{
+				int bodyId = bodyIds[i];
+				b2Body* body = b2BodyArray_Get( &world->bodies, bodyId );
+				b2Vec2 p = body->center;
 
-		// Update centers, handle empty clusters
-		for ( int i = 0; i < B2_CLUSTER_COUNT; ++i )
-		{
-			int clusterBodyCount = clusters[i].bodyIndices.count;
-			if ( clusterBodyCount > 0 )
-			{
-				clusters[i].center = b2MulSV( 1.0f / clusterBodyCount, clusters[i].accumulator );
-			}
-			else
-			{
-				// Re-seed empty cluster from body furthest from its assigned center
-				float maxDistanceSquared = -1.0f;
-				int maxBody = 0;
-				for ( int b = 0; b < awakeCount; ++b )
+				float minDistanceSquared = b2DistanceSquared( p, clusters[0].center );
+				int bestIndex = 0;
+
+				for ( int j = 1; j < B2_CLUSTER_COUNT; ++j )
 				{
-					int ci = bodySims[b].clusterIndex;
-					float d = b2DistanceSquared( bodySims[b].center, clusters[ci].center );
-					if ( d > maxDistanceSquared )
+					float distanceSquared = b2DistanceSquared( p, clusters[j].center );
+					if ( distanceSquared < minDistanceSquared )
 					{
-						maxDistanceSquared = d;
-						maxBody = b;
+						minDistanceSquared = distanceSquared;
+						bestIndex = j;
 					}
 				}
-				clusters[i].center = bodySims[maxBody].center;
+
+				body->clusterIndex = (int16_t)bestIndex;
+				b2Array_Push( clusters[bestIndex].bodyIds, bodyId );
+				clusters[bestIndex].accumulator = b2Add( clusters[bestIndex].accumulator, p );
+			}
+
+			// Update centers, handle empty clusters
+			for ( int i = 0; i < B2_CLUSTER_COUNT; ++i )
+			{
+				int clusterBodyCount = clusters[i].bodyIds.count;
+				if ( clusterBodyCount > 0 )
+				{
+					clusters[i].center = b2MulSV( 1.0f / clusterBodyCount, clusters[i].accumulator );
+				}
+				else
+				{
+					// Re-seed empty cluster from body furthest from its assigned center
+					float maxDistanceSquared = -1.0f;
+					b2Body* maxBody = NULL;
+					for ( int b = 0; b < awakeCount; ++b )
+					{
+						int bodyId = bodyIds[b];
+						b2Body* body = b2BodyArray_Get( &world->bodies, bodyId );
+
+						int ci = body->clusterIndex;
+						float d = b2DistanceSquared( body->center, clusters[ci].center );
+						if ( d > maxDistanceSquared )
+						{
+							maxDistanceSquared = d;
+							maxBody = body;
+						}
+					}
+					clusters[i].center = maxBody->center;
+				}
 			}
 		}
 	}
+
+	// Copy body state. Organize states according to clusters for improved caching
+	context->states = b2AllocateArenaItem( &world->arena, awakeCount * sizeof( b2BodyState ), "states" );
+	int stateIndex = 0;
+
+	b2Vec2 g = world->gravity;
+	for ( int i = 0; i < B2_CLUSTER_COUNT; ++i )
+	{
+		int clusterBodyCount = clusters[i].bodyIds.count;
+
+		for ( int j = 0; j < clusterBodyCount; ++j )
+		{
+			int bodyId = clusters[i].bodyIds.data[j];
+			b2Body* body = b2BodyArray_Get( &world->bodies, bodyId );
+			body->stateIndex = stateIndex;
+
+			b2BodyState* state = context->states + stateIndex;
+			state->linearVelocity = body->linearVelocity;
+			state->angularVelocity = body->angularVelocity;
+			state->force = b2MulAdd( body->force, body->gravityScale * body->mass, g );
+			state->torque = body->torque;
+			state->invMass = body->invMass;
+			state->invInertia = body->invInertia;
+			state->flags = body->flags;
+			state->bodyId = bodyId;
+			state->deltaPosition = b2Vec2_zero;
+			state->deltaRotation = b2Rot_identity;
+
+			stateIndex += 1;
+		}
+	}
+
+	B2_ASSERT( stateIndex == awakeCount );
 }
 
 // Convert a pair (a, b) with a < b into a linear border index
@@ -186,9 +223,7 @@ static inline int b2GetBorderIndex( int a, int b )
 
 void b2ClassifyConstraints( b2World* world, b2StepContext* context )
 {
-	b2ConstraintGraph* graph = &world->constraintGraph;
 	b2SolverSet* awakeSet = b2SolverSetArray_Get( &world->solverSets, b2_awakeSet );
-	b2BodySim* bodySims = awakeSet->bodySims.data;
 
 	// Temporary counts for sizing
 	int clusterContactCounts[B2_CLUSTER_COUNT] = { 0 };
@@ -198,31 +233,40 @@ void b2ClassifyConstraints( b2World* world, b2StepContext* context )
 	int borderContactCounts[B2_MAX_BORDERS] = { 0 };
 	int borderJointCounts[B2_MAX_BORDERS] = { 0 };
 
-	// First pass: count contacts per cluster/border across all graph colors
-	for ( int colorIndex = 0; colorIndex < B2_GRAPH_COLOR_COUNT - 1; ++colorIndex )
+	// First pass: count contacts per cluster/border
 	{
-		b2GraphColor* color = graph->colors + colorIndex;
-		int contactCount = color->contactSims.count;
-		b2ContactSim* contacts = color->contactSims.data;
+		int awakeContactCount = awakeSet->contactSims.count;
+		b2ContactSim* awakeContactSims = awakeSet->contactSims.data;
 
-		for ( int i = 0; i < contactCount; ++i )
+		for ( int i = 0; i < awakeContactCount; ++i )
 		{
-			b2ContactSim* contactSim = contacts + i;
-			int indexA = contactSim->bodySimIndexA;
-			int indexB = contactSim->bodySimIndexB;
+			b2ContactSim* contactSim = awakeContactSims + i;
 
-			// Static bodies have B2_NULL_INDEX for bodySimIndex
-			if ( indexA == B2_NULL_INDEX || indexB == B2_NULL_INDEX )
+			// Skip non-touching contacts
+			if ( contactSim->manifold.pointCount == 0 )
+				continue;
+
+			int idA = contactSim->bodyIdA;
+			int idB = contactSim->bodyIdB;
+			b2Body* bodyA = b2BodyArray_Get( &world->bodies, idA );
+			b2Body* bodyB = b2BodyArray_Get( &world->bodies, idB );
+			b2BodyType typeA = bodyA->type;
+			b2BodyType typeB = bodyB->type;
+
+			if ( typeA == b2_staticBody )
 			{
-				// Static-dynamic contact: assign to dynamic body's cluster
-				int dynamicIndex = ( indexA != B2_NULL_INDEX ) ? indexA : indexB;
-				int clusterIdx = bodySims[dynamicIndex].clusterIndex;
+				int clusterIdx = bodyB->clusterIndex;
+				clusterContactCounts[clusterIdx] += 1;
+			}
+			else if ( typeB == b2_staticBody )
+			{
+				int clusterIdx = bodyA->clusterIndex;
 				clusterContactCounts[clusterIdx] += 1;
 			}
 			else
 			{
-				int clusterA = bodySims[indexA].clusterIndex;
-				int clusterB = bodySims[indexB].clusterIndex;
+				int clusterA = bodyA->clusterIndex;
+				int clusterB = bodyB->clusterIndex;
 
 				if ( clusterA == clusterB )
 				{
@@ -239,35 +283,36 @@ void b2ClassifyConstraints( b2World* world, b2StepContext* context )
 		}
 	}
 
-	// First pass: count joints per cluster/border across all graph colors
-	for ( int colorIndex = 0; colorIndex < B2_GRAPH_COLOR_COUNT - 1; ++colorIndex )
+	// First pass: count joints per cluster/border
 	{
-		b2GraphColor* color = graph->colors + colorIndex;
-		int jointCount = color->jointSims.count;
-		b2JointSim* joints = color->jointSims.data;
+		int awakeJointCount = awakeSet->jointSims.count;
+		b2JointSim* awakeJointSims = awakeSet->jointSims.data;
 
-		for ( int i = 0; i < jointCount; ++i )
+		for ( int i = 0; i < awakeJointCount; ++i )
 		{
-			b2JointSim* jointSim = joints + i;
+			b2JointSim* jointSim = awakeJointSims + i;
 			int bodyIdA = jointSim->bodyIdA;
 			int bodyIdB = jointSim->bodyIdB;
 
 			b2Body* bodyA = b2BodyArray_Get( &world->bodies, bodyIdA );
 			b2Body* bodyB = b2BodyArray_Get( &world->bodies, bodyIdB );
+			b2BodyType typeA = bodyA->type;
+			b2BodyType typeB = bodyB->type;
 
-			int indexA = ( bodyA->setIndex == b2_awakeSet ) ? bodyA->localIndex : B2_NULL_INDEX;
-			int indexB = ( bodyB->setIndex == b2_awakeSet ) ? bodyB->localIndex : B2_NULL_INDEX;
-
-			if ( indexA == B2_NULL_INDEX || indexB == B2_NULL_INDEX )
+			if ( typeA == b2_staticBody )
 			{
-				int dynamicIndex = ( indexA != B2_NULL_INDEX ) ? indexA : indexB;
-				int clusterIdx = bodySims[dynamicIndex].clusterIndex;
+				int clusterIdx = bodyB->clusterIndex;
+				clusterJointCounts[clusterIdx] += 1;
+			}
+			else if ( typeB == b2_staticBody )
+			{
+				int clusterIdx = bodyA->clusterIndex;
 				clusterJointCounts[clusterIdx] += 1;
 			}
 			else
 			{
-				int clusterA = bodySims[indexA].clusterIndex;
-				int clusterB = bodySims[indexB].clusterIndex;
+				int clusterA = bodyA->clusterIndex;
+				int clusterB = bodyB->clusterIndex;
 
 				if ( clusterA == clusterB )
 				{
@@ -286,6 +331,7 @@ void b2ClassifyConstraints( b2World* world, b2StepContext* context )
 
 	// Allocate cluster solve data arrays from arena
 	b2ClusterManager* manager = &world->clusterManager;
+	int stateIndex = 0;
 	for ( int i = 0; i < B2_CLUSTER_COUNT; ++i )
 	{
 		b2ClusterSolveData* cd = context->clusterData + i;
@@ -294,37 +340,27 @@ void b2ClassifyConstraints( b2World* world, b2StepContext* context )
 		int cc = clusterContactCounts[i];
 		int jc = clusterJointCounts[i];
 
-		cd->contacts = ( cc > 0 )
-			? b2AllocateArenaItem( &world->arena, cc * sizeof( b2ContactSim* ), "cluster contacts" )
-			: NULL;
+		cd->contacts = ( cc > 0 ) ? b2AllocateArenaItem( &world->arena, cc * sizeof( b2ContactSim* ), "cluster contacts" ) : NULL;
 		cd->contactCount = 0;
 
-		cd->joints = ( jc > 0 )
-			? b2AllocateArenaItem( &world->arena, jc * sizeof( b2JointSim* ), "cluster joints" )
-			: NULL;
+		cd->joints = ( jc > 0 ) ? b2AllocateArenaItem( &world->arena, jc * sizeof( b2JointSim* ), "cluster joints" ) : NULL;
 		cd->jointCount = 0;
 
-		cd->contactConstraints = ( cc > 0 )
-			? b2AllocateArenaItem( &world->arena, cc * sizeof( b2ContactConstraint ), "cluster contact constraints" )
-			: NULL;
+		cd->contactConstraints =
+			( cc > 0 ) ? b2AllocateArenaItem( &world->arena, cc * sizeof( b2ContactConstraint ), "cluster contact constraints" )
+					   : NULL;
 
 		// Allocate per-cluster local body state array for L1 cache locality
-		int bodyCount = cluster->bodyIndices.count;
+		int bodyCount = cluster->bodyIds.count;
 		cd->bodyCount = bodyCount;
-		cd->bodyIndices = cluster->bodyIndices.data;
-		cd->localStates = ( bodyCount > 0 )
-			? b2AllocateArenaItem( &world->arena, bodyCount * sizeof( b2BodyState ), "cluster local states" )
-			: NULL;
-
-		// Build reverse mapping: global awake index -> local cluster index
-		for ( int k = 0; k < bodyCount; ++k )
-		{
-			int globalIndex = cluster->bodyIndices.data[k];
-			bodySims[globalIndex].localClusterIndex = k;
-		}
+		cd->bodyIds = cluster->bodyIds.data;
+		cd->states = context->states + stateIndex;
+		stateIndex += bodyCount;
 
 		b2AtomicStoreInt( &cd->solveComplete, 0 );
 	}
+
+	B2_ASSERT( stateIndex == awakeSet->bodyIds.count );
 
 	// Count non-empty borders and allocate
 	int borderCount = 0;
@@ -337,9 +373,9 @@ void b2ClassifyConstraints( b2World* world, b2StepContext* context )
 	}
 
 	context->borderCount = borderCount;
-	context->borders = ( borderCount > 0 )
-		? b2AllocateArenaItem( &world->arena, borderCount * sizeof( b2BorderConstraints ), "border constraints" )
-		: NULL;
+	context->borders = ( borderCount > 0 ) ? b2AllocateArenaItem( &world->arena, borderCount * sizeof( b2BorderConstraints ),
+																  "border constraints" )
+										   : NULL;
 
 	// Fill in border data
 	int borderWriteIndex = 0;
@@ -360,19 +396,17 @@ void b2ClassifyConstraints( b2World* world, b2StepContext* context )
 			border->clusterA = a;
 			border->clusterB = b;
 
-			border->contacts = ( cc > 0 )
-				? b2AllocateArenaItem( &world->arena, cc * sizeof( b2ContactSim* ), "border contacts" )
-				: NULL;
+			border->contacts =
+				( cc > 0 ) ? b2AllocateArenaItem( &world->arena, cc * sizeof( b2ContactSim* ), "border contacts" ) : NULL;
 			border->contactCount = 0;
 
-			border->joints = ( jc > 0 )
-				? b2AllocateArenaItem( &world->arena, jc * sizeof( b2JointSim* ), "border joints" )
-				: NULL;
+			border->joints =
+				( jc > 0 ) ? b2AllocateArenaItem( &world->arena, jc * sizeof( b2JointSim* ), "border joints" ) : NULL;
 			border->jointCount = 0;
 
-			border->contactConstraints = ( cc > 0 )
-				? b2AllocateArenaItem( &world->arena, cc * sizeof( b2ContactConstraint ), "border contact constraints" )
-				: NULL;
+			border->contactConstraints = ( cc > 0 ) ? b2AllocateArenaItem( &world->arena, cc * sizeof( b2ContactConstraint ),
+																		   "border contact constraints" )
+													: NULL;
 
 			// Store the border write index in the flat array for the second pass
 			// Reuse borderContactCounts as a mapping from flat index -> border write index
@@ -382,29 +416,39 @@ void b2ClassifyConstraints( b2World* world, b2StepContext* context )
 	}
 
 	// Second pass: distribute contact pointers to clusters and borders
-	for ( int colorIndex = 0; colorIndex < B2_GRAPH_COLOR_COUNT - 1; ++colorIndex )
 	{
-		b2GraphColor* color = graph->colors + colorIndex;
-		int contactCount = color->contactSims.count;
-		b2ContactSim* contacts = color->contactSims.data;
+		int awakeContactCount = awakeSet->contactSims.count;
+		b2ContactSim* awakeContactSims = awakeSet->contactSims.data;
 
-		for ( int i = 0; i < contactCount; ++i )
+		for ( int i = 0; i < awakeContactCount; ++i )
 		{
-			b2ContactSim* contactSim = contacts + i;
-			int indexA = contactSim->bodySimIndexA;
-			int indexB = contactSim->bodySimIndexB;
+			b2ContactSim* contactSim = awakeContactSims + i;
 
-			if ( indexA == B2_NULL_INDEX || indexB == B2_NULL_INDEX )
+			// Skip non-touching contacts
+			if ( contactSim->manifold.pointCount == 0 )
+				continue;
+
+			int idA = contactSim->bodyIdA;
+			int idB = contactSim->bodyIdB;
+			b2Body* bodyA = b2BodyArray_Get( &world->bodies, idA );
+			b2Body* bodyB = b2BodyArray_Get( &world->bodies, idB );
+			b2BodyType typeA = bodyA->type;
+			b2BodyType typeB = bodyB->type;
+
+			if ( typeA == b2_staticBody )
 			{
-				int dynamicIndex = ( indexA != B2_NULL_INDEX ) ? indexA : indexB;
-				int clusterIdx = bodySims[dynamicIndex].clusterIndex;
-				b2ClusterSolveData* cd = context->clusterData + clusterIdx;
+				b2ClusterSolveData* cd = context->clusterData + bodyB->clusterIndex;
+				cd->contacts[cd->contactCount++] = contactSim;
+			}
+			else if ( typeB == b2_staticBody )
+			{
+				b2ClusterSolveData* cd = context->clusterData + bodyA->clusterIndex;
 				cd->contacts[cd->contactCount++] = contactSim;
 			}
 			else
 			{
-				int clusterA = bodySims[indexA].clusterIndex;
-				int clusterB = bodySims[indexB].clusterIndex;
+				int clusterA = bodyA->clusterIndex;
+				int clusterB = bodyB->clusterIndex;
 
 				if ( clusterA == clusterB )
 				{
@@ -426,35 +470,36 @@ void b2ClassifyConstraints( b2World* world, b2StepContext* context )
 	}
 
 	// Second pass: distribute joint pointers to clusters and borders
-	for ( int colorIndex = 0; colorIndex < B2_GRAPH_COLOR_COUNT - 1; ++colorIndex )
 	{
-		b2GraphColor* color = graph->colors + colorIndex;
-		int jointCount = color->jointSims.count;
-		b2JointSim* joints = color->jointSims.data;
+		int awakeJointCount = awakeSet->jointSims.count;
+		b2JointSim* awakeJointSims = awakeSet->jointSims.data;
 
-		for ( int i = 0; i < jointCount; ++i )
+		for ( int i = 0; i < awakeJointCount; ++i )
 		{
-			b2JointSim* jointSim = joints + i;
+			b2JointSim* jointSim = awakeJointSims + i;
 			int bodyIdA = jointSim->bodyIdA;
 			int bodyIdB = jointSim->bodyIdB;
 
 			b2Body* bodyA = b2BodyArray_Get( &world->bodies, bodyIdA );
 			b2Body* bodyB = b2BodyArray_Get( &world->bodies, bodyIdB );
 
-			int indexA = ( bodyA->setIndex == b2_awakeSet ) ? bodyA->localIndex : B2_NULL_INDEX;
-			int indexB = ( bodyB->setIndex == b2_awakeSet ) ? bodyB->localIndex : B2_NULL_INDEX;
+			b2BodyType typeA = bodyA->type;
+			b2BodyType typeB = bodyB->type;
 
-			if ( indexA == B2_NULL_INDEX || indexB == B2_NULL_INDEX )
+			if ( typeA == b2_staticBody )
 			{
-				int dynamicIndex = ( indexA != B2_NULL_INDEX ) ? indexA : indexB;
-				int clusterIdx = bodySims[dynamicIndex].clusterIndex;
-				b2ClusterSolveData* cd = context->clusterData + clusterIdx;
+				b2ClusterSolveData* cd = context->clusterData + bodyB->clusterIndex;
+				cd->joints[cd->jointCount++] = jointSim;
+			}
+			else if ( typeB == b2_staticBody )
+			{
+				b2ClusterSolveData* cd = context->clusterData + bodyA->clusterIndex;
 				cd->joints[cd->jointCount++] = jointSim;
 			}
 			else
 			{
-				int clusterA = bodySims[indexA].clusterIndex;
-				int clusterB = bodySims[indexB].clusterIndex;
+				int clusterA = bodyA->clusterIndex;
+				int clusterB = bodyB->clusterIndex;
 
 				if ( clusterA == clusterB )
 				{

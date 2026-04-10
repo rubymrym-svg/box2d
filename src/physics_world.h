@@ -7,7 +7,6 @@
 #include "container.h"
 #include "bitset.h"
 #include "broad_phase.h"
-#include "constraint_graph.h"
 #include "id_pool.h"
 #include "arena_allocator.h"
 #include "cluster.h"
@@ -48,7 +47,6 @@ typedef struct b2World
 {
 	b2ArenaAllocator arena;
 	b2BroadPhase broadPhase;
-	b2ConstraintGraph constraintGraph;
 	b2ClusterManager clusterManager;
 
 	// The body id pool is used to allocate and recycle body ids. Body ids

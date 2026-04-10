@@ -437,7 +437,6 @@ static void UpdateUI()
 				ImGui::Checkbox( "Bounds", &s_context.debugDraw.drawBounds );
 				ImGui::Checkbox( "Mass", &s_context.debugDraw.drawMass );
 				ImGui::Checkbox( "Body Names", &s_context.debugDraw.drawBodyNames );
-				ImGui::Checkbox( "Graph Colors", &s_context.debugDraw.drawGraphColors );
 				ImGui::Checkbox( "Islands", &s_context.debugDraw.drawIslands );
 				ImGui::Checkbox( "Counters", &s_context.drawCounters );
 				ImGui::Checkbox( "Profile", &s_context.drawProfile );

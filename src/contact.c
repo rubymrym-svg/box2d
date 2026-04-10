@@ -281,7 +281,6 @@ void b2CreateContact( b2World* world, b2Shape* shapeA, b2Shape* shapeB )
 	contact->contactId = contactId;
 	contact->generation += 1;
 	contact->setIndex = setIndex;
-	contact->colorIndex = B2_NULL_INDEX;
 	contact->localIndex = set->contactSims.count;
 	contact->islandId = B2_NULL_INDEX;
 	contact->islandIndex = B2_NULL_INDEX;
@@ -339,18 +338,8 @@ void b2CreateContact( b2World* world, b2Shape* shapeA, b2Shape* shapeB )
 	// they will link islands and be moved into the constraint graph.
 	b2ContactSim* contactSim = b2ContactSimArray_Add( &set->contactSims );
 	contactSim->contactId = contactId;
-
-#if B2_ENABLE_VALIDATION
 	contactSim->bodyIdA = shapeA->bodyId;
 	contactSim->bodyIdB = shapeB->bodyId;
-#endif
-
-	contactSim->bodySimIndexA = B2_NULL_INDEX;
-	contactSim->bodySimIndexB = B2_NULL_INDEX;
-	contactSim->invMassA = 0.0f;
-	contactSim->invIA = 0.0f;
-	contactSim->invMassB = 0.0f;
-	contactSim->invIB = 0.0f;
 	contactSim->shapeIdA = shapeIdA;
 	contactSim->shapeIdB = shapeIdB;
 	contactSim->cache = b2_emptySimplexCache;
@@ -474,31 +463,19 @@ void b2DestroyContact( b2World* world, b2Contact* contact, bool wakeBodies )
 		b2UnlinkContact( world, contact );
 	}
 
-	if ( contact->colorIndex != B2_NULL_INDEX )
-	{
-		// contact is an active constraint
-		B2_ASSERT( contact->setIndex == b2_awakeSet );
-		b2RemoveContactFromGraph( world, bodyIdA, bodyIdB, contact->colorIndex, contact->localIndex );
-	}
-	else
-	{
-		// contact is non-touching or is sleeping
-		B2_ASSERT( contact->setIndex != b2_awakeSet || ( contact->flags & b2_contactTouchingFlag ) == 0 );
-		b2SolverSet* set = b2SolverSetArray_Get( &world->solverSets, contact->setIndex );
+	b2SolverSet* set = b2SolverSetArray_Get( &world->solverSets, contact->setIndex );
 
-		int movedIndex = b2ContactSimArray_RemoveSwap( &set->contactSims, contact->localIndex );
-		if ( movedIndex != B2_NULL_INDEX )
-		{
-			b2ContactSim* movedContactSim = set->contactSims.data + contact->localIndex;
-			b2Contact* movedContact = b2ContactArray_Get( &world->contacts, movedContactSim->contactId );
-			movedContact->localIndex = contact->localIndex;
-		}
+	int movedIndex = b2ContactSimArray_RemoveSwap( &set->contactSims, contact->localIndex );
+	if ( movedIndex != B2_NULL_INDEX )
+	{
+		b2ContactSim* movedContactSim = set->contactSims.data + contact->localIndex;
+		b2Contact* movedContact = b2ContactArray_Get( &world->contacts, movedContactSim->contactId );
+		movedContact->localIndex = contact->localIndex;
 	}
 
 	// Free contact and id (preserve generation)
 	contact->contactId = B2_NULL_INDEX;
 	contact->setIndex = B2_NULL_INDEX;
-	contact->colorIndex = B2_NULL_INDEX;
 	contact->localIndex = B2_NULL_INDEX;
 	b2FreeId( &world->contactIdPool, contactId );
 
@@ -511,14 +488,6 @@ void b2DestroyContact( b2World* world, b2Contact* contact, bool wakeBodies )
 
 b2ContactSim* b2GetContactSim( b2World* world, b2Contact* contact )
 {
-	if ( contact->setIndex == b2_awakeSet && contact->colorIndex != B2_NULL_INDEX )
-	{
-		// contact lives in constraint graph
-		B2_ASSERT( 0 <= contact->colorIndex && contact->colorIndex < B2_GRAPH_COLOR_COUNT );
-		b2GraphColor* color = world->constraintGraph.colors + contact->colorIndex;
-		return b2ContactSimArray_Get( &color->contactSims, contact->localIndex );
-	}
-
 	b2SolverSet* set = b2SolverSetArray_Get( &world->solverSets, contact->setIndex );
 	return b2ContactSimArray_Get( &set->contactSims, contact->localIndex );
 }

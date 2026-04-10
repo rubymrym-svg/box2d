@@ -237,36 +237,20 @@ void b2PrepareDistanceJoint( b2JointSim* base, b2StepContext* context )
 	b2Body* bodyA = b2BodyArray_Get( &world->bodies, idA );
 	b2Body* bodyB = b2BodyArray_Get( &world->bodies, idB );
 
-	B2_ASSERT( bodyA->setIndex == b2_awakeSet || bodyB->setIndex == b2_awakeSet );
+	base->stateIndexA = bodyA->stateIndex;
+	base->stateIndexB = bodyB->stateIndex;
 
-	b2SolverSet* setA = b2SolverSetArray_Get( &world->solverSets, bodyA->setIndex );
-	b2SolverSet* setB = b2SolverSetArray_Get( &world->solverSets, bodyB->setIndex );
-
-	int localIndexA = bodyA->localIndex;
-	int localIndexB = bodyB->localIndex;
-
-	b2BodySim* bodySimA = b2BodySimArray_Get( &setA->bodySims, localIndexA );
-	b2BodySim* bodySimB = b2BodySimArray_Get( &setB->bodySims, localIndexB );
-
-	float mA = bodySimA->invMass;
-	float iA = bodySimA->invInertia;
-	float mB = bodySimB->invMass;
-	float iB = bodySimB->invInertia;
-
-	base->invMassA = mA;
-	base->invMassB = mB;
-	base->invIA = iA;
-	base->invIB = iB;
+	float mA = bodyA->invMass;
+	float iA = bodyA->invInertia;
+	float mB = bodyB->invMass;
+	float iB = bodyB->invInertia;
 
 	b2DistanceJoint* joint = &base->distanceJoint;
 
-	joint->indexA = bodyA->setIndex == b2_awakeSet ? localIndexA : B2_NULL_INDEX;
-	joint->indexB = bodyB->setIndex == b2_awakeSet ? localIndexB : B2_NULL_INDEX;
-
 	// initial anchors in world space
-	joint->anchorA = b2RotateVector( bodySimA->transform.q, b2Sub( base->localFrameA.p, bodySimA->localCenter ) );
-	joint->anchorB = b2RotateVector( bodySimB->transform.q, b2Sub( base->localFrameB.p, bodySimB->localCenter ) );
-	joint->deltaCenter = b2Sub( bodySimB->center, bodySimA->center );
+	joint->anchorA = b2RotateVector( bodyA->transform.q, b2Sub( base->localFrameA.p, bodyA->localCenter ) );
+	joint->anchorB = b2RotateVector( bodyB->transform.q, b2Sub( base->localFrameB.p, bodyB->localCenter ) );
+	joint->deltaCenter = b2Sub( bodyB->center, bodyA->center );
 
 	b2Vec2 rA = joint->anchorA;
 	b2Vec2 rB = joint->anchorB;
@@ -294,17 +278,17 @@ void b2WarmStartDistanceJoint( b2JointSim* base, b2StepContext* context )
 {
 	B2_ASSERT( base->type == b2_distanceJoint );
 
-	float mA = base->invMassA;
-	float mB = base->invMassB;
-	float iA = base->invIA;
-	float iB = base->invIB;
-
 	// dummy state for static bodies
 	b2BodyState dummyState = b2_identityBodyState;
 
 	b2DistanceJoint* joint = &base->distanceJoint;
-	b2BodyState* stateA = joint->indexA == B2_NULL_INDEX ? &dummyState : context->states + joint->indexA;
-	b2BodyState* stateB = joint->indexB == B2_NULL_INDEX ? &dummyState : context->states + joint->indexB;
+	b2BodyState* stateA = base->stateIndexA == B2_NULL_INDEX ? &dummyState : context->states + base->stateIndexA;
+	b2BodyState* stateB = base->stateIndexB == B2_NULL_INDEX ? &dummyState : context->states + base->stateIndexB;
+
+	float mA = stateA->invMass;
+	float iA = stateA->invInertia;
+	float mB = stateB->invMass;
+	float iB = stateB->invInertia;
 
 	b2Vec2 rA = b2RotateVector( stateA->deltaRotation, joint->anchorA );
 	b2Vec2 rB = b2RotateVector( stateB->deltaRotation, joint->anchorB );
@@ -333,17 +317,17 @@ void b2SolveDistanceJoint( b2JointSim* base, b2StepContext* context, bool useBia
 {
 	B2_ASSERT( base->type == b2_distanceJoint );
 
-	float mA = base->invMassA;
-	float mB = base->invMassB;
-	float iA = base->invIA;
-	float iB = base->invIB;
-
 	// dummy state for static bodies
 	b2BodyState dummyState = b2_identityBodyState;
 
 	b2DistanceJoint* joint = &base->distanceJoint;
-	b2BodyState* stateA = joint->indexA == B2_NULL_INDEX ? &dummyState : context->states + joint->indexA;
-	b2BodyState* stateB = joint->indexB == B2_NULL_INDEX ? &dummyState : context->states + joint->indexB;
+	b2BodyState* stateA = base->stateIndexA == B2_NULL_INDEX ? &dummyState : context->states + base->stateIndexA;
+	b2BodyState* stateB = base->stateIndexB == B2_NULL_INDEX ? &dummyState : context->states + base->stateIndexB;
+
+	float mA = stateA->invMass;
+	float iA = stateA->invInertia;
+	float mB = stateB->invMass;
+	float iB = stateB->invInertia;
 
 	b2Vec2 vA = stateA->linearVelocity;
 	float wA = stateA->angularVelocity;

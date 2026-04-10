@@ -17,9 +17,6 @@ set(BOX2D_SOURCE_FILES
 
 	cluster.c
 	cluster.h
-
-	constraint_graph.c
-	constraint_graph.h
 	contact.c
 	contact.h
 	contact_solver.c

@@ -17,8 +17,8 @@
 #define TracyCFrameMark
 #endif
 
-#define EXPECTED_SLEEP_STEP 293
-#define EXPECTED_HASH 0x2FF98AC6
+#define EXPECTED_SLEEP_STEP 252
+#define EXPECTED_HASH 0x72A0639E
 
 enum
 {
@@ -108,6 +108,8 @@ static int SingleMultithreadingTest( int workerCount )
 		b2World_Step( worldId, timeStep, subStepCount );
 		TracyCFrameMark;
 
+		taskCount = 0;
+
 		bool done = UpdateFallingHinges( worldId, &data );
 
 		if (done)
@@ -125,8 +127,8 @@ static int SingleMultithreadingTest( int workerCount )
 
 	enkiDeleteTaskScheduler( scheduler );
 
-	//ENSURE( data.sleepStep == EXPECTED_SLEEP_STEP );
-	//ENSURE( data.hash == EXPECTED_HASH );
+	ENSURE( data.sleepStep == EXPECTED_SLEEP_STEP );
+	ENSURE( data.hash == EXPECTED_HASH );
 
 	DestroyFallingHinges( &data );
 
@@ -165,8 +167,8 @@ static int CrossPlatformTest( void )
 		done = UpdateFallingHinges( worldId, &data );
 	}
 
-	//ENSURE( data.sleepStep == EXPECTED_SLEEP_STEP );
-	//ENSURE( data.hash == EXPECTED_HASH );
+	ENSURE( data.sleepStep == EXPECTED_SLEEP_STEP );
+	ENSURE( data.hash == EXPECTED_HASH );
 
 	DestroyFallingHinges( &data );
 

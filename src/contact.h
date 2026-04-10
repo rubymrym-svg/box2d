@@ -53,12 +53,7 @@ typedef struct b2Contact
 	// B2_NULL_INDEX when slot is free
 	int setIndex;
 
-	// index into the constraint graph color array
-	// B2_NULL_INDEX for non-touching or sleeping contacts
-	// B2_NULL_INDEX when slot is free
-	int colorIndex;
-
-	// contact index within set or graph color
+	// contact index within set
 	// B2_NULL_INDEX when slot is free
 	int localIndex;
 
@@ -109,23 +104,11 @@ typedef struct b2ContactSim
 	b2Transform cachedTransformA;
 	b2Transform cachedTransformB;
 
-#if B2_ENABLE_VALIDATION
 	int bodyIdA;
 	int bodyIdB;
-#endif
-
-	// Transient body indices
-	int bodySimIndexA;
-	int bodySimIndexB;
 
 	int shapeIdA;
 	int shapeIdB;
-
-	float invMassA;
-	float invIA;
-
-	float invMassB;
-	float invIB;
 
 	b2Manifold manifold;
 
